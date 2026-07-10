@@ -8,7 +8,9 @@ export function updateBackgroundAndExtractMotion(
   outputData: ImageData,
   threshold: number,
   bgLearningRate: number = 0.05,
-  invertColors: boolean = false
+  invertColors: boolean = false,
+  enableLightTracking: boolean = false,
+  lightThreshold: number = 200
 ) {
   const len = currData.data.length;
   const c = currData.data;
@@ -21,7 +23,14 @@ export function updateBackgroundAndExtractMotion(
     // RGB sum difference
     const diff = Math.abs(c[i] - bgData[i]) + Math.abs(c[i+1] - bgData[i+1]) + Math.abs(c[i+2] - bgData[i+2]);
     
-    if (diff > threshold) {
+    let isForeground = diff > threshold;
+
+    if (enableLightTracking) {
+      const brightness = Math.max(c[i], c[i+1], c[i+2]); // use max channel for brightness
+      isForeground = isForeground && brightness > lightThreshold;
+    }
+
+    if (isForeground) {
       // Foreground: copy original pixel, set alpha to 255
       o[i] = invertColors ? 255 - c[i] : c[i];
       o[i+1] = invertColors ? 255 - c[i+1] : c[i+1];

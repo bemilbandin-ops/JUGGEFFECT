@@ -55,6 +55,8 @@ export default function TrackingCanvas() {
   const [settings, setSettings] = useState<TrackingSettings>({
     enableTrails: true,
     motionThreshold: 45,
+    enableLightTracking: false,
+    lightThreshold: 200,
     echoFadeRate: 0.05,
     bgLearningRate: 0.05,
     blurAmount: 0,
@@ -350,7 +352,9 @@ export default function TrackingCanvas() {
         motionMaskDataRef.current,
         currentSettings.motionThreshold,
         currentSettings.bgLearningRate,
-        currentSettings.invertColors
+        currentSettings.invertColors,
+        currentSettings.enableLightTracking,
+        currentSettings.lightThreshold
       );
 
       // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
@@ -889,6 +893,43 @@ export default function TrackingCanvas() {
                 <span>Less (Ignores noise)</span>
                 <span>More (Extracts everything)</span>
               </div>
+            </div>
+
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-xl hover:border-neutral-700/60 transition-all mt-2">
+              <div className="flex flex-col">
+                <span className="font-medium">Filter by Brightness</span>
+                <span className="text-[10px] text-neutral-500">Only track bright moving objects (e.g. LED props)</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.enableLightTracking}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, enableLightTracking: e.target.checked }))
+                }
+                className="sr-only peer"
+              />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+            </label>
+
+            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableLightTracking ? 'hidden' : ''}`}>
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400">Brightness Threshold</span>
+                  <span className="text-[10px] text-neutral-500">Minimum brightness to track.</span>
+                </div>
+                <span className="text-neutral-200 font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="255"
+                step="1"
+                value={settings.lightThreshold}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, lightThreshold: parseInt(e.target.value) }))
+                }
+                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
             </div>
 
             <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
