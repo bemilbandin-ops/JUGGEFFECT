@@ -51,6 +51,7 @@ export default function TrackingCanvas() {
   
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>({
+    enableTrails: true,
     motionThreshold: 45,
     echoFadeRate: 0.05,
     bgLearningRate: 0.05,
@@ -360,70 +361,75 @@ export default function TrackingCanvas() {
         currentSettings.invertColors
       );
 
-      // Effect: Feedback Zoom and Smoke Drift
-      if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = trailCanvas.width;
-        tempCanvas.height = trailCanvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
-        if (tempCtx) {
-          tempCtx.drawImage(trailCanvas, 0, 0);
-          trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-          
-          trailCtx.save();
-          // Center for scaling
-          trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
-          trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
-          trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
-          
-          // Apply drift
-          trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
-          trailCtx.restore();
+      // Effect: Trail processing and rendering
+      if (currentSettings.enableTrails) {
+        // Effect: Feedback Zoom and Smoke Drift
+        if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = trailCanvas.width;
+          tempCanvas.height = trailCanvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+            tempCtx.drawImage(trailCanvas, 0, 0);
+            trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+            
+            trailCtx.save();
+            // Center for scaling
+            trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
+            trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
+            trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
+            
+            // Apply drift
+            trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
+            trailCtx.restore();
+          }
         }
-      }
 
-      trailCtx.globalCompositeOperation = 'destination-out';
-      trailCtx.fillStyle = `rgba(0, 0, 0, ${currentSettings.echoFadeRate})`;
-      trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
-      
-      // Effect: Color Cycle and Stroboscopic rendering
-      frameCountAbsRef.current++;
-      colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
+        trailCtx.globalCompositeOperation = 'destination-out';
+        trailCtx.fillStyle = `rgba(0, 0, 0, ${currentSettings.echoFadeRate})`;
+        trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
+        
+        // Effect: Color Cycle and Stroboscopic rendering
+        frameCountAbsRef.current++;
+        colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
 
-      const now = performance.now();
-      let shouldStrobe = false;
-      if (currentSettings.strobeRate <= 0) {
-        shouldStrobe = true;
-      } else {
-        if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
+        const now = performance.now();
+        let shouldStrobe = false;
+        if (currentSettings.strobeRate <= 0) {
           shouldStrobe = true;
-          lastStrobeTimeRef.current = now;
+        } else {
+          if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
+            shouldStrobe = true;
+            lastStrobeTimeRef.current = now;
+          }
         }
-      }
 
-      if (shouldStrobe) {
-        trailCtx.globalCompositeOperation = 'source-over';
-        
-        const filters = [];
-        if (currentSettings.blurAmount > 0) {
-          filters.push(`blur(${currentSettings.blurAmount}px)`);
+        if (shouldStrobe) {
+          trailCtx.globalCompositeOperation = 'source-over';
+          
+          const filters = [];
+          if (currentSettings.blurAmount > 0) {
+            filters.push(`blur(${currentSettings.blurAmount}px)`);
+          }
+          
+          const totalHueShift = (currentSettings.hueRotate + colorCycleAngleRef.current) % 360;
+          if (totalHueShift > 0) {
+            filters.push(`hue-rotate(${totalHueShift}deg)`);
+          }
+          
+          trailCtx.filter = filters.length > 0 ? filters.join(' ') : 'none';
+          
+          procCtx.putImageData(motionMaskDataRef.current, 0, 0);
+          trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
+          trailCtx.filter = 'none'; // reset filter
         }
-        
-        const totalHueShift = (currentSettings.hueRotate + colorCycleAngleRef.current) % 360;
-        if (totalHueShift > 0) {
-          filters.push(`hue-rotate(${totalHueShift}deg)`);
-        }
-        
-        trailCtx.filter = filters.length > 0 ? filters.join(' ') : 'none';
-        
-        procCtx.putImageData(motionMaskDataRef.current, 0, 0);
-        trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
-        trailCtx.filter = 'none'; // reset filter
-      }
 
-      ctx.globalCompositeOperation = (currentSettings.compositeMode as GlobalCompositeOperation) || 'screen';
-      ctx.drawImage(trailCanvas, 0, 0, w, h);
-      ctx.globalCompositeOperation = 'source-over';
+        ctx.globalCompositeOperation = (currentSettings.compositeMode as GlobalCompositeOperation) || 'screen';
+        ctx.drawImage(trailCanvas, 0, 0, w, h);
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+      }
 
       // Draw debug binary mask overlay if enabled
       if (currentSettings.showDebugFeed) {
@@ -800,6 +806,22 @@ export default function TrackingCanvas() {
                 Pixel-perfect masking extracts moving props and stamps them into an echo buffer. The trail matches the exact shape, brightness, and colors of your flow prop at each frame.
               </p>
             </div>
+
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-xl hover:border-neutral-700/60 transition-all">
+              <div className="flex flex-col">
+                <span className="font-medium">Enable Motion Trails</span>
+                <span className="text-[10px] text-neutral-500">Stamp and draw moving paths on the screen</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.enableTrails}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, enableTrails: e.target.checked }))
+                }
+                className="sr-only peer"
+              />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+            </label>
             
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
@@ -826,23 +848,30 @@ export default function TrackingCanvas() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5 mt-2">
+            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableTrails ? 'opacity-40 pointer-events-none' : ''}`}>
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
                   <span className="text-neutral-400">Echo Trail Length</span>
                   <span className="text-[10px] text-neutral-500">How long the trail persists before fading away.</span>
                 </div>
-                <span className="text-neutral-200 font-mono">{Math.round((1 - settings.echoFadeRate) * 100)}% retention</span>
+                <span className="text-neutral-200 font-mono">
+                  {Math.round((1 - settings.echoFadeRate) * 100) === 0 
+                    ? '0% (No Trail)' 
+                    : Math.round((1 - settings.echoFadeRate) * 100) === 100 
+                      ? '100% (Infinite)' 
+                      : `${Math.round((1 - settings.echoFadeRate) * 100)}% retention`}
+                </span>
               </div>
               <input
                 type="range"
-                min="1"
-                max="20"
+                min="0"
+                max="100"
                 step="1"
-                value={21 - Math.round(settings.echoFadeRate * 100)}
-                onChange={(e) =>
-                  setSettings((prev) => ({ ...prev, echoFadeRate: (21 - parseInt(e.target.value)) / 100 }))
-                }
+                value={Math.round((1 - settings.echoFadeRate) * 100)}
+                onChange={(e) => {
+                  const retention = parseInt(e.target.value);
+                  setSettings((prev) => ({ ...prev, echoFadeRate: 1 - (retention / 100) }));
+                }}
                 className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
