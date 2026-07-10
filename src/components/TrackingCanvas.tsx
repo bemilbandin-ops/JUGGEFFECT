@@ -16,7 +16,8 @@ import {
   ChevronRight,
   Activity,
   Award,
-  Waves
+  Waves,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
@@ -52,6 +53,12 @@ export default function TrackingCanvas() {
   const [isDemoSelected, setIsDemoSelected] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
   
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>({
@@ -873,7 +880,7 @@ export default function TrackingCanvas() {
           {cameraActive && (
             <>
               {/* Top status bar */}
-              <div className="absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 pr-[340px]">
+              <div className={`absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 transition-all duration-300 ${isSidebarOpen ? 'lg:pr-[340px]' : ''}`}>
                 <div className="flex flex-col gap-1.5 pointer-events-auto">
                   <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2 w-fit">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -900,10 +907,24 @@ export default function TrackingCanvas() {
                 </div>
 
                 <div className="flex gap-2 pointer-events-auto">
+                  {/* Settings toggle */}
+                  <button
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    className={`border p-2 rounded-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
+                      isSidebarOpen 
+                        ? 'bg-blue-600 border-blue-500 text-white' 
+                        : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                    }`}
+                    title={isSidebarOpen ? 'Hide Settings' : 'Show Settings'}
+                  >
+                    <Sliders className="w-4 h-4" />
+                    <span className="hidden sm:inline text-xs font-medium">Settings</span>
+                  </button>
+
                   {/* Full screen toggle */}
                   <button
                     onClick={toggleFullscreen}
-                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95"
+                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95 cursor-pointer"
                     title={isFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'}
                   >
                     {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -911,7 +932,7 @@ export default function TrackingCanvas() {
 
                   <button
                     onClick={stopCamera}
-                    className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 hover:bg-rose-500 text-rose-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 flex items-center gap-1.5"
+                    className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 hover:bg-rose-500 text-rose-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
                     Stop
@@ -1186,9 +1207,45 @@ export default function TrackingCanvas() {
           )}
         </AnimatePresence>
 
+      {/* Floating Settings toggle for when camera is not active */}
+      {!cameraActive && !isSidebarOpen && (
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="absolute top-14 right-4 z-20 bg-[#0a0a0a]/90 hover:bg-neutral-900 border border-neutral-800 text-neutral-200 py-2 px-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
+        >
+          <Sliders className="w-4 h-4 text-blue-400" />
+          <span className="text-xs font-semibold tracking-wider font-sans">Settings</span>
+        </button>
+      )}
+
       {/* 2. Control Panel Sidebar */}
-      <div className="absolute right-0 top-10 bottom-0 w-80 bg-[#0a0a0a]/90 backdrop-blur-2xl border-l border-neutral-800 z-20 overflow-y-auto flex flex-col gap-5 p-4 shadow-2xl">
-        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'tween', duration: 0.2 }}
+            className="absolute right-0 top-10 bottom-0 w-full sm:w-80 bg-[#0a0a0a]/95 backdrop-blur-2xl border-l border-neutral-800 z-30 overflow-y-auto flex flex-col gap-5 p-4 shadow-2xl"
+          >
+            {/* Sidebar Header with Close Button */}
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-1 shrink-0">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-blue-400" />
+                <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                  Settings Panel
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/80 p-1.5 rounded-lg transition-all cursor-pointer"
+                title="Close Settings"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
             <Activity className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
@@ -1655,7 +1712,9 @@ export default function TrackingCanvas() {
             </label>
           </div>
         </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
