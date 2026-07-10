@@ -23,11 +23,17 @@ export function updateBackgroundAndExtractMotion(
     // RGB sum difference
     const diff = Math.abs(c[i] - bgData[i]) + Math.abs(c[i+1] - bgData[i+1]) + Math.abs(c[i+2] - bgData[i+2]);
     
-    let isForeground = diff > threshold;
-
-    if (enableLightTracking) {
-      const brightness = Math.max(c[i], c[i+1], c[i+2]); // use max channel for brightness
-      isForeground = isForeground && brightness > lightThreshold;
+    let isForeground = false;
+    if (diff > threshold) {
+      isForeground = true;
+      // Only check brightness if the pixel is already moving!
+      if (enableLightTracking) {
+        const r = c[i], g = c[i+1], b = c[i+2];
+        const brightness = r > g ? (r > b ? r : b) : (g > b ? g : b); // Inline Math.max for speed
+        if (brightness <= lightThreshold) {
+          isForeground = false;
+        }
+      }
     }
 
     if (isForeground) {
