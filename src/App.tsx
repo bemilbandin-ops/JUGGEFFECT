@@ -1,3 +1,4 @@
+// Vercel deployment trigger
 import { Camera, Settings2 } from 'lucide-react';
 import TrackingCanvas from './components/TrackingCanvas';
 
