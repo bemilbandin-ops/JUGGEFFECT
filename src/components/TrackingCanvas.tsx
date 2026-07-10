@@ -39,6 +39,7 @@ export default function TrackingCanvas() {
   const trailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -400,9 +401,14 @@ export default function TrackingCanvas() {
       if (shouldProcessTrails) {
         // Effect: Feedback Zoom and Smoke Drift
         if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = trailCanvas.width;
-          tempCanvas.height = trailCanvas.height;
+          if (!driftCanvasRef.current) {
+            driftCanvasRef.current = document.createElement('canvas');
+          }
+          const tempCanvas = driftCanvasRef.current;
+          if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
+            tempCanvas.width = trailCanvas.width;
+            tempCanvas.height = trailCanvas.height;
+          }
           const tempCtx = tempCanvas.getContext('2d');
           if (tempCtx) {
             tempCtx.drawImage(trailCanvas, 0, 0);
