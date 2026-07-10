@@ -30,5 +30,6 @@ export interface TrackingSettings {
   feedbackZoom: number;
   motionBlur: number;
   lineSmoothness: number;
+  edgeAntiAliasing: number;
 }
 

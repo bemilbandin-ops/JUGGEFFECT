@@ -73,6 +73,7 @@ export default function TrackingCanvas() {
     feedbackZoom: 1.0,
     motionBlur: 0,
     lineSmoothness: 0,
+    edgeAntiAliasing: 30,
   });
 
   const settingsRef = useRef(settings);
@@ -382,7 +383,8 @@ export default function TrackingCanvas() {
         currentSettings.bgLearningRate,
         currentSettings.invertColors,
         currentSettings.enableLightTracking,
-        currentSettings.lightThreshold
+        currentSettings.lightThreshold,
+        currentSettings.edgeAntiAliasing
       );
 
       // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
@@ -1049,8 +1051,8 @@ export default function TrackingCanvas() {
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Line Smoothness</span>
-                  <span className="text-[10px] text-neutral-500">Smooths pixelated edges of the motion trail.</span>
+                  <span className="text-neutral-400">Smear Edges</span>
+                  <span className="text-[10px] text-neutral-500">Applies a spatial blur (creates a glowing cloud if set too high).</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
               </div>
@@ -1062,6 +1064,27 @@ export default function TrackingCanvas() {
                 value={settings.lineSmoothness}
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, lineSmoothness: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 mt-2">
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400">Shape Anti-Aliasing</span>
+                  <span className="text-[10px] text-neutral-500">Smooths pixelated staircases on mask edges perfectly without smearing the shape.</span>
+                </div>
+                <span className="text-neutral-200 font-mono">{settings.edgeAntiAliasing}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="150"
+                step="5"
+                value={settings.edgeAntiAliasing}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, edgeAntiAliasing: parseInt(e.target.value) }))
                 }
                 className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />

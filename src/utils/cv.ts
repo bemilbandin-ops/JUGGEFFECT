@@ -10,7 +10,8 @@ export function updateBackgroundAndExtractMotion(
   bgLearningRate: number = 0.05,
   invertColors: boolean = false,
   enableLightTracking: boolean = false,
-  lightThreshold: number = 200
+  lightThreshold: number = 200,
+  edgeAntiAliasing: number = 0
 ) {
   const len = currData.data.length;
   const c = currData.data;
@@ -37,11 +38,19 @@ export function updateBackgroundAndExtractMotion(
     }
 
     if (isForeground) {
-      // Foreground: copy original pixel, set alpha to 255
+      // Calculate anti-aliased alpha
+      let alpha = 255;
+      if (edgeAntiAliasing > 0) {
+        if (diff < threshold + edgeAntiAliasing) {
+           alpha = Math.floor(((diff - threshold) / edgeAntiAliasing) * 255);
+        }
+      }
+
+      // Foreground: copy original pixel, set computed alpha
       o[i] = invertColors ? 255 - c[i] : c[i];
       o[i+1] = invertColors ? 255 - c[i+1] : c[i+1];
       o[i+2] = invertColors ? 255 - c[i+2] : c[i+2];
-      o[i+3] = 255;
+      o[i+3] = alpha;
       
       // Update background slowly
       bgData[i] += (c[i] - bgData[i]) * fgRate;
