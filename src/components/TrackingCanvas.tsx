@@ -467,6 +467,7 @@ export default function TrackingCanvas() {
           }
           const tempCtx = tempCanvas.getContext('2d');
           if (tempCtx) {
+            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
             tempCtx.drawImage(trailCanvas, 0, 0);
             trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
             

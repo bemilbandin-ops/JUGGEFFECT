@@ -58,6 +58,9 @@ export function updateBackgroundAndExtractMotion(
       bgData[i+2] += (c[i+2] - bgData[i+2]) * fgRate;
     } else {
       // Background: transparent
+      o[i] = 0;
+      o[i+1] = 0;
+      o[i+2] = 0;
       o[i+3] = 0; 
       
       // Update background normally
