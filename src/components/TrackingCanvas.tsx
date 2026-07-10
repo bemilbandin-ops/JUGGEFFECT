@@ -1433,10 +1433,10 @@ export default function TrackingCanvas() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.2 }}
-            className="absolute right-0 top-10 bottom-0 w-full sm:w-80 bg-[#0a0a0a]/95 backdrop-blur-2xl border-l border-neutral-800 z-30 overflow-y-auto flex flex-col gap-5 p-4 shadow-2xl"
+            className="absolute right-0 top-10 bottom-0 w-full sm:w-80 bg-[#0a0a0a]/95 backdrop-blur-2xl border-l border-neutral-800 z-30 flex flex-col shadow-2xl"
           >
             {/* Sidebar Header with Close Button */}
-            <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-1 shrink-0">
+            <div className="flex items-center justify-between border-b border-neutral-800 p-4 pb-3 shrink-0">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-blue-400" />
                 <h3 className="font-sans font-semibold text-sm text-neutral-200">
@@ -1452,7 +1452,8 @@ export default function TrackingCanvas() {
               </button>
             </div>
 
-            <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
+            <div className="flex-1 overflow-y-auto flex flex-col gap-5 p-4 pt-1">
+              <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
             <Activity className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
@@ -1963,6 +1964,7 @@ export default function TrackingCanvas() {
             </label>
           </div>
         </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
