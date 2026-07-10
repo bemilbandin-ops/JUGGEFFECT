@@ -92,6 +92,8 @@ export default function TrackingCanvas() {
   const [recordedSize, setRecordedSize] = useState<number>(0);
   const [supportedMimeTypes, setSupportedMimeTypes] = useState<{ label: string; mimeType: string; ext: string }[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportConfigured, setExportConfigured] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
@@ -837,12 +839,28 @@ export default function TrackingCanvas() {
             <>
               {/* Top status bar */}
               <div className="absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 pr-[340px]">
-                <div className="flex gap-2">
-                  <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2">
+                <div className="flex flex-col gap-1.5 pointer-events-auto">
+                  <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2 w-fit">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                     <span className="text-xs font-mono font-medium text-neutral-300">LIVE</span>
                     <span className="text-xs text-neutral-500">|</span>
                     <span className="text-xs font-mono text-blue-400">{fps} FPS</span>
+                  </div>
+
+                  {/* Active Export Settings HUD */}
+                  <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-800/80 flex flex-col gap-1 text-[9px] font-mono text-neutral-400 w-fit">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                      <span>Format: <span className="text-neutral-200 uppercase">{settings.exportMimeType ? (supportedMimeTypes.find(t => t.mimeType === settings.exportMimeType)?.ext || 'webm') : 'webm'}</span></span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                      <span>FPS: <span className="text-neutral-200">{settings.exportFps} FPS</span></span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      <span>Quality: <span className="text-neutral-200 capitalize">{settings.exportQuality} ({settings.exportQuality === 'ultra' ? '30M' : settings.exportQuality === 'high' ? '15M' : settings.exportQuality === 'medium' ? '8M' : '4M'}bps)</span></span>
+                    </div>
                   </div>
                 </div>
 
@@ -876,14 +894,32 @@ export default function TrackingCanvas() {
                     <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
                     <span>Stop ({formatTime(recordingSeconds)})</span>
                   </button>
-                ) : (
+                ) : !exportConfigured ? (
                   <button
-                    onClick={startRecording}
-                    className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10"
+                    onClick={() => setShowExportModal(true)}
+                    className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white active:scale-95 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all border border-amber-500/30"
+                    title="Configure Export Settings"
                   >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>Record Overlay</span>
+                    <Sliders className="w-3.5 h-3.5 font-sans" />
+                    <span className="font-sans">Configure Export Quality First</span>
                   </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={startRecording}
+                      className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10 font-sans"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Record Overlay</span>
+                    </button>
+                    <button
+                      onClick={() => setShowExportModal(true)}
+                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
+                      title="Adjust Export Quality Settings"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
 
                 {settings.showDebugFeed && (
@@ -914,6 +950,138 @@ export default function TrackingCanvas() {
           </div>
         </div>
         </div>
+
+        {/* Export Settings Modal */}
+        <AnimatePresence>
+          {showExportModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 pointer-events-auto"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-xl p-6 flex flex-col gap-5 shadow-2xl font-sans"
+              >
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-blue-400" />
+                    <h3 className="font-semibold text-sm text-neutral-200">
+                      Configure Export Quality
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowExportModal(false)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-4 font-sans">
+                  {/* Export Framerate */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
+                      <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      {[30, 60].map((fpsVal) => (
+                        <button
+                          key={fpsVal}
+                          type="button"
+                          onClick={() => setSettings((prev) => ({ ...prev, exportFps: fpsVal as 30 | 60 }))}
+                          className={`py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                            settings.exportFps === fpsVal
+                              ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
+                              : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
+                          }`}
+                        >
+                          {fpsVal} FPS
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Export Quality / Bitrate */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
+                      <span className="text-[10px] text-neutral-500">Higher bitrates prevent pixelation in high motion.</span>
+                    </div>
+                    <select
+                      value={settings.exportQuality}
+                      onChange={(e) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
+                        }))
+                      }
+                      className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                    >
+                      <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
+                      <option value="high">High (15 Mbps - Premium/Clear)</option>
+                      <option value="medium">Medium (8 Mbps - Balanced)</option>
+                      <option value="standard">Standard (4 Mbps - Compact)</option>
+                    </select>
+                  </div>
+
+                  {/* Container & Codec format */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
+                      <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
+                    </div>
+                    {supportedMimeTypes.length > 0 ? (
+                      <select
+                        value={settings.exportMimeType}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
+                        }
+                        className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                      >
+                        {supportedMimeTypes.map((t) => (
+                          <option key={t.mimeType} value={t.mimeType}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
+                        No supported recording codecs detected.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 border-t border-neutral-800 pt-4 mt-1 font-sans">
+                  <button
+                    onClick={() => {
+                      setExportConfigured(true);
+                      setShowExportModal(false);
+                    }}
+                    className="flex-1 bg-neutral-800 hover:bg-neutral-750 text-neutral-300 py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98]"
+                  >
+                    Save Settings
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportConfigured(true);
+                      setShowExportModal(false);
+                      setTimeout(() => startRecording(), 100);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
+                  >
+                    Apply & Start
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* 3. Exported Video Preview / Download Card */}
         <AnimatePresence>
@@ -1359,92 +1527,6 @@ export default function TrackingCanvas() {
               }
               className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
-          </div>
-        </div>
-
-        {/* Video Export Settings */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
-          <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Download className="w-4 h-4 text-blue-400" />
-            <h3 className="font-sans font-semibold text-sm text-neutral-200">
-              Video Export Settings
-            </h3>
-          </div>
-
-          <div className="flex flex-col gap-4 py-1">
-            {/* Target Framerate */}
-            <div className="flex flex-col gap-1.5">
-              <div className="flex flex-col">
-                <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
-                <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                {[30, 60].map((fpsVal) => (
-                  <button
-                    key={fpsVal}
-                    type="button"
-                    onClick={() => setSettings((prev) => ({ ...prev, exportFps: fpsVal as 30 | 60 }))}
-                    className={`py-1.5 rounded text-xs font-mono font-medium transition-all ${
-                      settings.exportFps === fpsVal
-                        ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
-                        : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
-                    }`}
-                  >
-                    {fpsVal} FPS
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Target Quality / Bitrate */}
-            <div className="flex flex-col gap-1.5">
-              <div className="flex flex-col">
-                <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
-                <span className="text-[10px] text-neutral-500">Higher bitrates preserve trail crispness.</span>
-              </div>
-              <select
-                value={settings.exportQuality}
-                onChange={(e) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
-                  }))
-                }
-                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
-              >
-                <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
-                <option value="high">High (15 Mbps - Premium/Clear)</option>
-                <option value="medium">Medium (8 Mbps - Balanced)</option>
-                <option value="standard">Standard (4 Mbps - Compact)</option>
-              </select>
-            </div>
-
-            {/* Container & Codec format */}
-            <div className="flex flex-col gap-1.5 font-sans">
-              <div className="flex flex-col">
-                <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
-                <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
-              </div>
-              {supportedMimeTypes.length > 0 ? (
-                <select
-                  value={settings.exportMimeType}
-                  onChange={(e) =>
-                    setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
-                  }
-                  className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
-                >
-                  {supportedMimeTypes.map((t) => (
-                    <option key={t.mimeType} value={t.mimeType}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
-                  No supported recording codecs detected.
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
