@@ -54,7 +54,9 @@ export default function TrackingCanvas() {
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>({
     enableTrails: true,
-    motionThreshold: 45,
+    motionThreshold: 50,
+    enableLightTracking: false,
+    lightThreshold: 200,
     echoFadeRate: 0.05,
     bgLearningRate: 0.05,
     blurAmount: 0,
@@ -350,7 +352,9 @@ export default function TrackingCanvas() {
         motionMaskDataRef.current,
         currentSettings.motionThreshold,
         currentSettings.bgLearningRate,
-        currentSettings.invertColors
+        currentSettings.invertColors,
+        currentSettings.enableLightTracking,
+        currentSettings.lightThreshold
       );
 
       // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
@@ -583,13 +587,13 @@ export default function TrackingCanvas() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    <div className="w-full h-full relative bg-black">
       {/* 1. Main Interactive Camera Viewport */}
-      <div className="lg:col-span-8 flex flex-col gap-4 sticky top-6 z-10">
+      
         <div
           ref={containerRef}
-          className={`relative bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex items-center justify-center aspect-video shadow-2xl transition-all duration-300 ${
-            isFullscreen ? 'fixed inset-0 z-50 rounded-none border-none' : ''
+          className={`absolute inset-0 z-0 bg-black flex items-center justify-center transition-all duration-300 ${
+            isFullscreen ? 'fixed inset-0 z-50' : ''
           }`}
         >
           {/* Unused raw video element (hidden offscreen, feed processed on canvas) */}
@@ -609,8 +613,8 @@ export default function TrackingCanvas() {
           />
 
           {!cameraActive && (
-            <div className="flex flex-col items-center justify-center p-8 text-center max-w-sm gap-4">
-              <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-emerald-400 border border-emerald-500/20">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center p-8 text-center w-[400px] max-w-[90vw] gap-4 bg-neutral-900/95 backdrop-blur-xl border border-neutral-800 shadow-2xl rounded">
+              <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-blue-400 border border-neutral-700/50">
                 {videoSourceMode === 'camera' ? (
                   <Camera className="w-8 h-8 animate-pulse" />
                 ) : (
@@ -626,12 +630,12 @@ export default function TrackingCanvas() {
                 </p>
               </div>
 
-              <div className="w-full flex bg-neutral-950/50 p-1 rounded-xl border border-neutral-800/80 mt-2">
+              <div className="w-full flex bg-neutral-950 p-1 rounded-sm border border-neutral-800 mt-2">
                 <button
                   onClick={() => setVideoSourceMode('camera')}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'camera'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
+                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
                       : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
                   }`}
                 >
@@ -641,7 +645,7 @@ export default function TrackingCanvas() {
                   onClick={() => setVideoSourceMode('file')}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'file'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
+                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
                       : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
                   }`}
                 >
@@ -655,7 +659,7 @@ export default function TrackingCanvas() {
                     <select
                       value={selectedDeviceId}
                       onChange={(e) => setSelectedDeviceId(e.target.value)}
-                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-emerald-500 transition-all"
+                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
                     >
                       {devices.map((device) => (
                         <option key={device.deviceId} value={device.deviceId}>
@@ -667,7 +671,7 @@ export default function TrackingCanvas() {
                     <button
                       onClick={startCamera}
                       disabled={cameraLoading}
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-neutral-950 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 disabled:opacity-50"
+                      className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50"
                     >
                       {cameraLoading ? 'Starting Stream...' : 'Initialize Camera'}
                     </button>
@@ -683,12 +687,12 @@ export default function TrackingCanvas() {
                     type="file" 
                     accept="video/*" 
                     onChange={handleFileSelected} 
-                    className="w-full text-sm text-neutral-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-emerald-500/10 file:text-emerald-400 hover:file:bg-emerald-500/20"
+                    className="w-full text-sm text-neutral-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-blue-500/10 file:text-blue-400 hover:file:bg-neutral-700/50"
                   />
                   <button
                     onClick={startCamera}
                     disabled={cameraLoading || !videoFileUrl}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-neutral-950 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 disabled:opacity-50"
+                    className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50"
                   >
                     {cameraLoading ? 'Starting Video...' : 'Play Video'}
                   </button>
@@ -701,13 +705,13 @@ export default function TrackingCanvas() {
           {cameraActive && (
             <>
               {/* Top status bar */}
-              <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none">
+              <div className="absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 pr-[340px]">
                 <div className="flex gap-2">
-                  <div className="bg-neutral-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-neutral-800/80 flex items-center gap-2">
+                  <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                     <span className="text-xs font-mono font-medium text-neutral-300">LIVE</span>
                     <span className="text-xs text-neutral-500">|</span>
-                    <span className="text-xs font-mono text-emerald-400">{fps} FPS</span>
+                    <span className="text-xs font-mono text-blue-400">{fps} FPS</span>
                   </div>
                 </div>
 
@@ -715,7 +719,7 @@ export default function TrackingCanvas() {
                   {/* Full screen toggle */}
                   <button
                     onClick={toggleFullscreen}
-                    className="bg-neutral-950/85 backdrop-blur-md border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95"
+                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95"
                     title={isFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'}
                   >
                     {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -732,7 +736,7 @@ export default function TrackingCanvas() {
               </div>
 
               {/* Bottom control bar (Recording controls) */}
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-950/90 backdrop-blur-md px-4 py-2 rounded-full border border-neutral-800/90 pointer-events-auto shadow-2xl">
+              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-900 px-4 py-2 rounded border border-neutral-800 pointer-events-auto shadow-2xl z-20">
                 {isRecording ? (
                   <button
                     onClick={stopRecording}
@@ -744,7 +748,7 @@ export default function TrackingCanvas() {
                 ) : (
                   <button
                     onClick={startRecording}
-                    className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-neutral-950 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/10"
+                    className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10"
                   >
                     <Play className="w-3 h-3 fill-current" />
                     <span>Record Overlay</span>
@@ -761,9 +765,10 @@ export default function TrackingCanvas() {
           )}
         </div>
 
-        {/* 2. Calibration Instructions */}
-        <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-4 flex gap-3.5 items-start">
-          <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20 mt-0.5 shrink-0">
+        {/* Calibration Instructions (Hidden in Pro Layout) */}
+        <div className="hidden">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex gap-3.5 items-start">
+          <div className="p-2 bg-blue-500/10 rounded-sm text-blue-400 border border-neutral-700/50 mt-0.5 shrink-0">
             <Info className="w-5 h-5" />
           </div>
           <div>
@@ -777,7 +782,7 @@ export default function TrackingCanvas() {
             </p>
           </div>
         </div>
-
+        </div>
         {/* 3. Exported Video Preview / Download Card */}
         <AnimatePresence>
           {recordedVideoUrl && (
@@ -785,7 +790,7 @@ export default function TrackingCanvas() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4 shadow-xl"
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] max-w-[90vw] bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4 shadow-2xl z-50"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -803,7 +808,7 @@ export default function TrackingCanvas() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                <div className="md:col-span-8 overflow-hidden rounded-xl bg-black border border-neutral-800 aspect-video">
+                <div className="md:col-span-8 overflow-hidden rounded-sm bg-black border border-neutral-800 aspect-video">
                   <video
                     src={recordedVideoUrl}
                     controls
@@ -820,7 +825,7 @@ export default function TrackingCanvas() {
                   <a
                     href={recordedVideoUrl}
                     download={`juggling_tracking_${Date.now()}.webm`}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-neutral-950 font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-emerald-500/10"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Download Video
@@ -830,27 +835,26 @@ export default function TrackingCanvas() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
 
-      {/* 2. Control Panel & Fine-tuning Sliders */}
-      <div className="lg:col-span-4 flex flex-col gap-5">
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+      {/* 2. Control Panel Sidebar */}
+      <div className="absolute right-0 top-10 bottom-0 w-80 bg-[#0a0a0a]/90 backdrop-blur-2xl border-l border-neutral-800 z-20 overflow-y-auto flex flex-col gap-5 p-4 shadow-2xl">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Activity className="w-4 h-4 text-emerald-400" />
+            <Activity className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               LED Echo Trails
             </h3>
           </div>
           
           <div className="flex flex-col gap-4 py-2">
-            <div className="p-3 bg-neutral-950/40 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-              <Sparkles className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-emerald-400/90 leading-relaxed">
+            <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-neutral-300 leading-relaxed">
                 Pixel-perfect masking extracts moving props and stamps them into an echo buffer. The trail matches the exact shape, brightness, and colors of your flow prop at each frame.
               </p>
             </div>
 
-            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-xl hover:border-neutral-700/60 transition-all">
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
               <div className="flex flex-col">
                 <span className="font-medium">Enable Motion Trails</span>
                 <span className="text-[10px] text-neutral-500">Stamp and draw moving paths on the screen</span>
@@ -863,7 +867,7 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
             
             <div className="flex flex-col gap-1.5 mt-2">
@@ -883,12 +887,49 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, motionThreshold: 135 - parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
                 <span>Less (Ignores noise)</span>
                 <span>More (Extracts everything)</span>
               </div>
+            </div>
+
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all mt-2">
+              <div className="flex flex-col">
+                <span className="font-medium">Filter by Brightness</span>
+                <span className="text-[10px] text-neutral-500">Only track bright moving objects (e.g. LED props)</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.enableLightTracking}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, enableLightTracking: e.target.checked }))
+                }
+                className="sr-only peer"
+              />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
+            </label>
+
+            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableLightTracking ? 'hidden' : ''}`}>
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400">Brightness Threshold</span>
+                  <span className="text-[10px] text-neutral-500">Minimum brightness to track.</span>
+                </div>
+                <span className="text-neutral-200 font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="255"
+                step="1"
+                value={settings.lightThreshold}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, lightThreshold: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
             </div>
 
             <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
@@ -915,7 +956,7 @@ export default function TrackingCanvas() {
                   const retention = parseInt(e.target.value);
                   setSettings((prev) => ({ ...prev, echoFadeRate: 1 - (retention / 100) }));
                 }}
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
@@ -936,7 +977,7 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, blurAmount: parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
@@ -957,7 +998,7 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, hueRotate: parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
             
@@ -976,7 +1017,7 @@ export default function TrackingCanvas() {
                     setSettings((prev) => ({ ...prev, enableTrails: true, compositeMode: val }));
                   }
                 }}
-                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-emerald-500 transition-all"
+                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
               >
                 <option value="none">Disabled (No Trails)</option>
                 <option value="screen">Screen (Glow)</option>
@@ -989,9 +1030,9 @@ export default function TrackingCanvas() {
         </div>
 
         {/* Cinematic Effects */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <Sparkles className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               Cinematic Effects
             </h3>
@@ -1016,7 +1057,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, strobeRate: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1039,7 +1080,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, colorCycleSpeed: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1060,7 +1101,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, verticalDrift: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
           
@@ -1081,7 +1122,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, horizontalDrift: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1104,7 +1145,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, feedbackZoom: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1127,15 +1168,15 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, motionBlur: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
         </div>
 
         {/* Universal settings */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Sliders className="w-4 h-4 text-emerald-400" />
+            <Sliders className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               Advanced Settings
             </h3>
@@ -1158,7 +1199,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, bgLearningRate: parseInt(e.target.value) / 100 }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
               <span>Stable</span>
@@ -1181,7 +1222,7 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
 
             <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
@@ -1197,7 +1238,7 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
 
             <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
@@ -1218,7 +1259,7 @@ export default function TrackingCanvas() {
                 }}
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
           </div>
         </div>

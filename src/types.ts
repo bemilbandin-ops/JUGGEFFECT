@@ -13,6 +13,8 @@ export interface HSV {
 export interface TrackingSettings {
   enableTrails: boolean; // Toggle to render motion trails
   motionThreshold: number; // For motion diff (0-255)
+  enableLightTracking: boolean; // Toggle to filter by brightness
+  lightThreshold: number; // Minimum brightness to track (0-255)
   echoFadeRate: number; // Trail fade speed for flow props
   bgLearningRate: number;
   blurAmount: number;
