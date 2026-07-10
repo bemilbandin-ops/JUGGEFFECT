@@ -13,6 +13,8 @@ export interface HSV {
 export interface TrackingSettings {
   enableTrails: boolean; // Toggle to render motion trails
   motionThreshold: number; // For motion diff (0-255)
+  enableLightTracking: boolean; // Toggle to filter by brightness
+  lightThreshold: number; // Minimum brightness to track (0-255)
   echoFadeRate: number; // Trail fade speed for flow props
   bgLearningRate: number;
   blurAmount: number;
@@ -22,10 +24,16 @@ export interface TrackingSettings {
   showDebugFeed: boolean; // Show binary threshold mask for debugging
   enableAudioSync: boolean; // Sync video sound with mic
   strobeRate: number;
+  strobeMode: 'freeze' | 'flash';
   colorCycleSpeed: number;
   verticalDrift: number;
   horizontalDrift: number;
   feedbackZoom: number;
   motionBlur: number;
+  lineSmoothness: number;
+  edgeAntiAliasing: number;
+  exportQuality: 'standard' | 'medium' | 'high' | 'ultra';
+  exportFps: 30 | 60;
+  exportMimeType: string;
 }
 

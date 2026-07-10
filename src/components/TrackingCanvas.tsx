@@ -16,11 +16,152 @@ import {
   ChevronRight,
   Activity,
   Award,
-  Waves
+  Waves,
+  X,
+  Key,
+  AlertCircle,
+  Zap,
+  Wind,
+  ChevronDown,
+  ChevronUp,
+  Infinity,
+  Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
+import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
+
+const QUICK_PRESETS = [
+  {
+    id: 'led',
+    name: 'LED Tracker',
+    description: 'Filters dark details to track glowing props in low light.',
+    icon: 'Zap',
+    color: 'text-amber-400 border-amber-500/20 hover:border-amber-500/40 bg-amber-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 40,
+      enableLightTracking: true,
+      lightThreshold: 200,
+      echoFadeRate: 0.08,
+      bgLearningRate: 0.05,
+      blurAmount: 4,
+      hueRotate: 0,
+      colorCycleSpeed: 0,
+      feedbackZoom: 1.0,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Neon Cyberpunk',
+    description: 'Vibrant rainbow trails with a zoom-tunnel echo.',
+    icon: 'Sparkles',
+    color: 'text-pink-400 border-pink-500/20 hover:border-pink-500/40 bg-pink-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 50,
+      enableLightTracking: false,
+      echoFadeRate: 0.05,
+      blurAmount: 8,
+      hueRotate: 180,
+      colorCycleSpeed: 1.5,
+      feedbackZoom: 1.03,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'smoke',
+    name: 'Spectral Smoke',
+    description: 'Ethereal trails that drift upwards like smoke.',
+    icon: 'Wind',
+    color: 'text-teal-400 border-teal-500/20 hover:border-teal-500/40 bg-teal-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 60,
+      enableLightTracking: false,
+      echoFadeRate: 0.03,
+      blurAmount: 6,
+      hueRotate: 0,
+      colorCycleSpeed: 0.3,
+      feedbackZoom: 1.0,
+      verticalDrift: -1.5,
+      horizontalDrift: 0.5,
+      strobeRate: 0,
+      motionBlur: 0.1,
+    }
+  },
+  {
+    id: 'strobe',
+    name: 'Strobe Echo',
+    description: 'Fading frozen silhouettes floating in space.',
+    icon: 'Activity',
+    color: 'text-cyan-400 border-cyan-500/20 hover:border-cyan-500/40 bg-cyan-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 55,
+      enableLightTracking: false,
+      echoFadeRate: 0.12,
+      blurAmount: 4,
+      feedbackZoom: 1.0,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0.15,
+      strobeMode: 'freeze',
+      hueRotate: 120,
+      colorCycleSpeed: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'vortex',
+    name: 'Wormhole Vortex',
+    description: 'Trails get sucked into an infinite inward spiral.',
+    icon: 'Infinity',
+    color: 'text-indigo-400 border-indigo-500/20 hover:border-indigo-500/40 bg-indigo-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 45,
+      enableLightTracking: false,
+      echoFadeRate: 0.02,
+      blurAmount: 2,
+      feedbackZoom: 0.96,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      colorCycleSpeed: 0.8,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'cascade',
+    name: 'Stardust Cascade',
+    description: 'Glowing violet clouds falling down like meteors.',
+    icon: 'Moon',
+    color: 'text-purple-400 border-purple-500/20 hover:border-purple-500/40 bg-purple-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 55,
+      enableLightTracking: false,
+      echoFadeRate: 0.10,
+      blurAmount: 12,
+      hueRotate: 240,
+      colorCycleSpeed: 0,
+      feedbackZoom: 1.0,
+      verticalDrift: 2.0,
+      horizontalDrift: -1.5,
+      strobeRate: 0,
+      motionBlur: 0.75,
+    }
+  }
+];
 
 export default function TrackingCanvas() {
   // Elements
@@ -40,6 +181,8 @@ export default function TrackingCanvas() {
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const smoothingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const strobeVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -48,13 +191,23 @@ export default function TrackingCanvas() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [videoSourceMode, setVideoSourceMode] = useState<'camera' | 'file'>('camera');
   const [videoFileUrl, setVideoFileUrl] = useState<string | null>(null);
+  const [isDemoSelected, setIsDemoSelected] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
+  const [activeTunerKey, setActiveTunerKey] = useState<string | null>(null);
   
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>({
     enableTrails: true,
-    motionThreshold: 45,
+    motionThreshold: 50,
+    enableLightTracking: false,
+    lightThreshold: 200,
     echoFadeRate: 0.05,
     bgLearningRate: 0.05,
     blurAmount: 0,
@@ -64,11 +217,17 @@ export default function TrackingCanvas() {
     showDebugFeed: false,
     enableAudioSync: false,
     strobeRate: 0,
+    strobeMode: 'freeze',
     colorCycleSpeed: 0,
     verticalDrift: 0,
     horizontalDrift: 0,
     feedbackZoom: 1.0,
     motionBlur: 0,
+    lineSmoothness: 0,
+    edgeAntiAliasing: 30,
+    exportQuality: 'high',
+    exportFps: 30,
+    exportMimeType: '',
   });
 
   const settingsRef = useRef(settings);
@@ -76,13 +235,191 @@ export default function TrackingCanvas() {
     settingsRef.current = settings;
   }, [settings]);
 
+  // Gemini State
+  const [apiKeyInput, setApiKeyInput] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
+  const [geminiActive, setGeminiActive] = useState<boolean>(() => !!getGeminiClient());
+  const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState<boolean>(false);
+  const [geminiAnalysisResult, setGeminiAnalysisResult] = useState<GeminiResponse | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [appliedOption, setAppliedOption] = useState<'A' | 'B' | null>(null);
+  const [originalSettings, setOriginalSettings] = useState<TrackingSettings | null>(null);
+  const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
+  const [geminiCollapsed, setGeminiCollapsed] = useState<boolean>(true);
+
+  const hasEnvApiKey = !!(import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY);
+
+  const handleSaveApiKey = (key: string) => {
+    const trimmed = key.trim();
+    localStorage.setItem('gemini_api_key', trimmed);
+    setApiKeyInput(trimmed);
+    setGeminiActive(!!trimmed);
+    if (!trimmed) {
+      localStorage.removeItem('gemini_api_key');
+    }
+  };
+
+  const captureFrame = (): string | null => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return null;
+
+    // Standardize and downscale resolution for AI analysis (max 640px on the longest side)
+    // This dramatically reduces upload times and inference latency for high-res cameras/videos.
+    const maxDimension = 640;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+
+    if (width > maxDimension || height > maxDimension) {
+      if (width > height) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.80);
+  };
+
+  const runGeminiAnalysis = async () => {
+    setIsGeminiAnalyzing(true);
+    setGeminiError(null);
+    setGeminiAnalysisResult(null);
+    setAppliedOption(null);
+    setOriginalSettings(null);
+
+    try {
+      const dataUrl = captureFrame();
+      if (!dataUrl) {
+        throw new Error('Please start the camera or a video file first to capture a frame.');
+      }
+      console.log('Captured image payload size:', Math.round(dataUrl.length / 1024), 'KB');
+
+      const client = getGeminiClient(apiKeyInput);
+      if (!client) {
+        throw new Error('Please configure a Gemini API key first.');
+      }
+
+      const result = await analyzeScene(dataUrl, apiKeyInput);
+      setGeminiAnalysisResult(result);
+    } catch (err: any) {
+      console.error('Gemini Scene Analysis Error:', err);
+      setGeminiError(err.message || 'An unknown error occurred during analysis.');
+    } finally {
+      setIsGeminiAnalyzing(false);
+    }
+  };
+
+  const applyRecommendedSettings = (recSettings: Partial<TrackingSettings>, option: 'A' | 'B') => {
+    setSettings((prev) => {
+      let base = originalSettings;
+      if (!base) {
+        base = prev;
+        setOriginalSettings(prev);
+      }
+      return {
+        ...base,
+        ...recSettings,
+      };
+    });
+    setAppliedOption(option);
+    setAppliedPresetId(null); // Clear preset selection if AI is used
+  };
+
+  const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
+    setSettings((prev) => {
+      let base = originalSettings;
+      if (!base) {
+        base = prev;
+        setOriginalSettings(prev);
+      }
+      return {
+        ...base,
+        ...presetSettings,
+      };
+    });
+    setAppliedPresetId(presetId);
+    setAppliedOption(null); // Clear Gemini option applied state
+  };
+
+  const resetToOriginalSettings = () => {
+    if (originalSettings) {
+      setSettings(originalSettings);
+      setOriginalSettings(null);
+      setAppliedOption(null);
+      setAppliedPresetId(null);
+    }
+  };
+
+  const getSettingDisplayName = (key: string, val: any): string => {
+    switch (key) {
+      case 'enableTrails': return val ? 'Trails: On' : 'Trails: Off';
+      case 'motionThreshold': return `Sensitivity: ${Math.round((135 - val))}%`;
+      case 'enableLightTracking': return val ? 'Light Filter: On' : 'Light Filter: Off';
+      case 'lightThreshold': return `Min Brightness: ${val}`;
+      case 'echoFadeRate': return `Trail Length: ${Math.round((1 - val) * 100)}%`;
+      case 'bgLearningRate': return `Adaptation Speed: ${Math.round(val * 100)}%`;
+      case 'blurAmount': return `Glow: ${val}px`;
+      case 'hueRotate': return `Hue Shift: ${val}°`;
+      case 'colorCycleSpeed': return val === 0 ? '' : `Color Cycle Speed: ${val}`;
+      case 'strobeRate': return val === 0 ? 'Strobe: Off' : `Strobe: ${val}s`;
+      case 'strobeMode': return `Strobe Style: ${val}`;
+      case 'feedbackZoom': return val === 1.0 ? 'Tunnel Zoom: Off' : `Tunnel Zoom: ${Math.round(val * 100)}%`;
+      case 'verticalDrift': return val === 0 ? '' : `Vertical Drift: ${val}px`;
+      case 'horizontalDrift': return val === 0 ? '' : `Horizontal Drift: ${val}px`;
+      case 'motionBlur': return val === 0 ? 'Motion Blur: Off' : `Motion Blur: ${Math.round(val * 100)}%`;
+      case 'lineSmoothness': return val === 0 ? 'Smoothing: Off' : `Smoothing: ${val}px`;
+      default: return `${key}: ${val}`;
+    }
+  };
+
   // Recording states
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
+  const [recordedExt, setRecordedExt] = useState<string>('webm');
+  const [recordedSize, setRecordedSize] = useState<number>(0);
+  const [supportedMimeTypes, setSupportedMimeTypes] = useState<{ label: string; mimeType: string; ext: string }[]>([]);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportConfigured, setExportConfigured] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+
+  // Detect browser supported video codecs
+  useEffect(() => {
+    const candidates = [
+      { label: 'WebM (VP9) - Ultra Quality', mimeType: 'video/webm;codecs=vp9,opus', ext: 'webm' },
+      { label: 'WebM (H.264) - High Compatibility', mimeType: 'video/webm;codecs=h264,opus', ext: 'webm' },
+      { label: 'WebM (VP8)', mimeType: 'video/webm;codecs=vp8,opus', ext: 'webm' },
+      { label: 'MP4 (H.264) - Apple/Standard', mimeType: 'video/mp4;codecs=h264,aac', ext: 'mp4' },
+      { label: 'MP4 (AAC)', mimeType: 'video/mp4', ext: 'mp4' },
+      { label: 'Matroska (MKV)', mimeType: 'video/x-matroska;codecs=avc1', ext: 'mkv' },
+      { label: 'WebM (Default)', mimeType: 'video/webm', ext: 'webm' }
+    ];
+    const supported = candidates.filter(candidate => {
+      try {
+        return MediaRecorder.isTypeSupported(candidate.mimeType);
+      } catch (e) {
+        return false;
+      }
+    });
+    setSupportedMimeTypes(supported);
+    if (supported.length > 0) {
+      setSettings(prev => ({
+        ...prev,
+        exportMimeType: prev.exportMimeType || supported[0].mimeType
+      }));
+    }
+  }, []);
 
   // Initialize and list camera devices
   useEffect(() => {
@@ -133,7 +470,6 @@ export default function TrackingCanvas() {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
       }
-      setRecordingSeconds(0);
     }
 
     return () => {
@@ -147,7 +483,41 @@ export default function TrackingCanvas() {
     if (e.target.files && e.target.files[0]) {
       const url = URL.createObjectURL(e.target.files[0]);
       setVideoFileUrl(url);
+      setIsDemoSelected(false);
     }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        setVideoFileUrl(url);
+        setVideoSourceMode('file');
+        setIsDemoSelected(false);
+        if (cameraActive) stopCamera();
+      }
+    }
+  }
+
+  function loadDemoVideo() {
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const videoUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}juggling-demo.mp4`;
+    setVideoFileUrl(videoUrl);
+    setIsDemoSelected(true);
   }
 
   // Start Camera Feed or Video File
@@ -324,12 +694,54 @@ export default function TrackingCanvas() {
         blurredVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight); // seed it
       }
 
+      if (!strobeVideoCanvasRef.current) {
+        strobeVideoCanvasRef.current = document.createElement('canvas');
+      }
+      const strobeVideoCanvas = strobeVideoCanvasRef.current;
+      const strobeVideoCtx = strobeVideoCanvas.getContext('2d');
+      if (strobeVideoCanvas.width !== video.videoWidth || strobeVideoCanvas.height !== video.videoHeight) {
+        strobeVideoCanvas.width = video.videoWidth;
+        strobeVideoCanvas.height = video.videoHeight;
+        if (strobeVideoCtx) {
+          strobeVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight); // seed it
+        }
+      }
+
       const w = canvas.width;
       const h = canvas.height;
       const currentSettings = settingsRef.current;
 
+      const isStrobeActive = currentSettings.strobeRate > 0;
+      let isStrobeTriggered = false;
+      if (!isStrobeActive) {
+        isStrobeTriggered = true;
+      } else {
+        if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
+          isStrobeTriggered = true;
+          lastStrobeTimeRef.current = now;
+        }
+      }
+
+      if (isStrobeActive && isStrobeTriggered && strobeVideoCtx) {
+        strobeVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+      }
+
       // 2. Draw raw video frame to display canvas
-      ctx.drawImage(video, 0, 0, w, h);
+      if (!isStrobeActive) {
+        ctx.drawImage(video, 0, 0, w, h);
+      } else {
+        if (currentSettings.strobeMode === 'flash') {
+          const flashDuration = 40; // flash duration in ms
+          if (now - lastStrobeTimeRef.current <= flashDuration) {
+            ctx.drawImage(strobeVideoCanvas, 0, 0, w, h);
+          } else {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, w, h);
+          }
+        } else {
+          ctx.drawImage(strobeVideoCanvas, 0, 0, w, h);
+        }
+      }
 
       // 3. Process frame for tracking
       // Draw frame to low-res canvas for high performance (using sharp video)
@@ -350,11 +762,36 @@ export default function TrackingCanvas() {
         motionMaskDataRef.current,
         currentSettings.motionThreshold,
         currentSettings.bgLearningRate,
-        currentSettings.invertColors
+        currentSettings.invertColors,
+        currentSettings.enableLightTracking,
+        currentSettings.lightThreshold,
+        currentSettings.edgeAntiAliasing
       );
 
       // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
       procCtx.putImageData(motionMaskDataRef.current, 0, 0);
+
+      // Apply Line Smoothness (Anti-aliasing/Blur) to the mask
+      if (currentSettings.lineSmoothness > 0) {
+        if (!smoothingCanvasRef.current) {
+          smoothingCanvasRef.current = document.createElement('canvas');
+        }
+        const smoothCanvas = smoothingCanvasRef.current;
+        if (smoothCanvas.width !== procCanvas.width || smoothCanvas.height !== procCanvas.height) {
+          smoothCanvas.width = procCanvas.width;
+          smoothCanvas.height = procCanvas.height;
+        }
+        const smoothCtx = smoothCanvas.getContext('2d');
+        if (smoothCtx) {
+           smoothCtx.clearRect(0, 0, smoothCanvas.width, smoothCanvas.height);
+           smoothCtx.filter = `blur(${currentSettings.lineSmoothness}px)`;
+           smoothCtx.drawImage(procCanvas, 0, 0);
+           smoothCtx.filter = 'none';
+           
+           procCtx.clearRect(0, 0, procCanvas.width, procCanvas.height);
+           procCtx.drawImage(smoothCanvas, 0, 0);
+        }
+      }
 
       // 4. Temporal Motion Blur (Only applied to moving objects)
       if (currentSettings.motionBlur > 0) {
@@ -395,61 +832,49 @@ export default function TrackingCanvas() {
       }
 
       // Effect: Trail processing and rendering
-      const isStrobeActive = currentSettings.strobeRate > 0;
-      const shouldProcessTrails = currentSettings.enableTrails || isStrobeActive;
+      const shouldProcessTrails = currentSettings.enableTrails;
 
       if (shouldProcessTrails) {
-        // Effect: Feedback Zoom and Smoke Drift
-        if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
-          if (!driftCanvasRef.current) {
-            driftCanvasRef.current = document.createElement('canvas');
-          }
-          const tempCanvas = driftCanvasRef.current;
-          if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
-            tempCanvas.width = trailCanvas.width;
-            tempCanvas.height = trailCanvas.height;
-          }
-          const tempCtx = tempCanvas.getContext('2d');
-          if (tempCtx) {
-            tempCtx.drawImage(trailCanvas, 0, 0);
-            trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-            
-            trailCtx.save();
-            // Center for scaling
-            trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
-            trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
-            trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
-            
-            // Apply drift
-            trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
-            trailCtx.restore();
-          }
-        }
-
-        // Determine fade rate (ensure strobe snapshots persist even if retention is set to 0%)
-        const fadeRate = isStrobeActive 
-          ? Math.min(currentSettings.echoFadeRate, 0.15) 
-          : currentSettings.echoFadeRate;
-
-        trailCtx.globalCompositeOperation = 'destination-out';
-        trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
-        trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
-        
-        // Effect: Color Cycle and Stroboscopic rendering
+        // Effect: Color Cycle updates continuously for smooth hue rotation
         frameCountAbsRef.current++;
         colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
 
-        let shouldStrobe = false;
-        if (!isStrobeActive) {
-          shouldStrobe = true;
-        } else {
-          if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
-            shouldStrobe = true;
-            lastStrobeTimeRef.current = now;
+        if (isStrobeTriggered) {
+          // 1. Effect: Feedback Zoom and Smoke Drift (only on strobe trigger to avoid smearing and rapid vanishing)
+          if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
+            if (!driftCanvasRef.current) {
+              driftCanvasRef.current = document.createElement('canvas');
+            }
+            const tempCanvas = driftCanvasRef.current;
+            if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
+              tempCanvas.width = trailCanvas.width;
+              tempCanvas.height = trailCanvas.height;
+            }
+            const tempCtx = tempCanvas.getContext('2d');
+            if (tempCtx) {
+              tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+              tempCtx.drawImage(trailCanvas, 0, 0);
+              trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+              
+              trailCtx.save();
+              // Center for scaling
+              trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
+              trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
+              trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
+              
+              // Apply drift
+              trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
+              trailCtx.restore();
+            }
           }
-        }
 
-        if (shouldStrobe) {
+          // 2. Apply fade (only on strobe trigger to preserve trail persistence across intervals)
+          const fadeRate = currentSettings.echoFadeRate;
+          trailCtx.globalCompositeOperation = 'destination-out';
+          trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
+          trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
+
+          // 3. Stroboscopic rendering: Draw new motion mask snapshot onto the trail canvas
           trailCtx.globalCompositeOperation = 'source-over';
           
           const filters = [];
@@ -509,10 +934,12 @@ export default function TrackingCanvas() {
     if (!canvas) return;
 
     setRecordedVideoUrl(null);
+    setRecordingSeconds(0);
     recordedChunksRef.current = [];
 
-    // Capture the processed canvas stream (matching whatever frame rate, ideal 30/60fps)
-    const stream = canvas.captureStream(30);
+    // Capture the processed canvas stream at the user's selected frame rate
+    const targetFps = settings.exportFps || 30;
+    const stream = canvas.captureStream(targetFps);
 
     // Request audio stream from user mic if enabled
     if (settings.enableAudioSync) {
@@ -526,14 +953,31 @@ export default function TrackingCanvas() {
       }
     }
 
-    // Initialize media recorder
-    const options = { mimeType: 'video/webm;codecs=vp9,opus' };
+    // Initialize media recorder with selected bitrate and codec options
+    const bitrates = {
+      ultra: 30000000,   // 30 Mbps
+      high: 15000000,    // 15 Mbps
+      medium: 8000000,   // 8 Mbps
+      standard: 4000000, // 4 Mbps
+    };
+    const targetBitrate = bitrates[settings.exportQuality] || 15000000;
+    const selectedMime = settings.exportMimeType || 'video/webm';
+
+    const options = {
+      mimeType: selectedMime,
+      videoBitsPerSecond: targetBitrate,
+    };
+
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(stream, options);
     } catch (e) {
-      // Fallback if VP9 not fully supported
-      recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      console.warn('Selected encoding parameters not supported, trying mimeType only:', e);
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: selectedMime });
+      } catch (e2) {
+        recorder = new MediaRecorder(stream);
+      }
     }
 
     recorder.ondataavailable = (event) => {
@@ -543,9 +987,21 @@ export default function TrackingCanvas() {
     };
 
     recorder.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const mimeType = recorder.mimeType || selectedMime;
+      
+      // Determine the extension based on recorded mimeType
+      let ext = 'webm';
+      if (mimeType.includes('mp4')) {
+        ext = 'mp4';
+      } else if (mimeType.includes('matroska') || mimeType.includes('mkv')) {
+        ext = 'mkv';
+      }
+      
+      const blob = new Blob(recordedChunksRef.current, { type: mimeType });
       const url = URL.createObjectURL(blob);
       setRecordedVideoUrl(url);
+      setRecordedExt(ext);
+      setRecordedSize(blob.size);
     };
 
     mediaRecorderRef.current = recorder;
@@ -582,14 +1038,126 @@ export default function TrackingCanvas() {
     return `${m}:${s}`;
   }
 
+  // Tuner settings configurations for the responsive phone quick-slider overlay
+  const tunerSettings = [
+    {
+      key: 'echoFadeRate',
+      name: 'Trail Length',
+      icon: Waves,
+      min: 0,
+      max: 100,
+      step: 1,
+      getValue: () => Math.round((1 - settings.echoFadeRate) * 100),
+      setValue: (val: number) => setSettings(prev => ({ ...prev, echoFadeRate: 1 - (val / 100) })),
+      format: (val: number) => val === 0 ? '0% (Off)' : val === 100 ? 'Infinite' : `${val}% retention`
+    },
+    {
+      key: 'motionThreshold',
+      name: 'Sensitivity',
+      icon: Activity,
+      min: 15,
+      max: 120,
+      step: 1,
+      getValue: () => 135 - settings.motionThreshold,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, motionThreshold: 135 - val })),
+      format: (val: number) => `${val}%`
+    },
+    {
+      key: 'blurAmount',
+      name: 'Trail Glow',
+      icon: Sparkles,
+      min: 0,
+      max: 20,
+      step: 1,
+      getValue: () => settings.blurAmount,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, blurAmount: val })),
+      format: (val: number) => `${val}px`
+    },
+    {
+      key: 'hueRotate',
+      name: 'Hue Shift',
+      icon: Sliders,
+      min: 0,
+      max: 360,
+      step: 1,
+      getValue: () => settings.hueRotate,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, hueRotate: val })),
+      format: (val: number) => `${val}°`
+    },
+    {
+      key: 'feedbackZoom',
+      name: 'Feedback Zoom',
+      icon: Maximize2,
+      min: 0.95,
+      max: 1.10,
+      step: 0.005,
+      getValue: () => settings.feedbackZoom,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, feedbackZoom: val })),
+      format: (val: number) => val === 1.0 ? '100% (Off)' : `${((val - 1) * 100).toFixed(1)}%`
+    },
+    {
+      key: 'strobeRate',
+      name: 'Strobe Rate',
+      icon: Camera,
+      min: 0,
+      max: 2.0,
+      step: 0.05,
+      getValue: () => settings.strobeRate,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, strobeRate: val })),
+      format: (val: number) => val === 0 ? 'Off' : `Every ${val.toFixed(2)}s`
+    }
+  ];
+
+  // Dynamic visual indicator styling (higher setting = more colorful/glowing, lower/off = grayed out)
+  const getSettingColor = (key: string) => {
+    switch (key) {
+      case 'echoFadeRate': {
+        const p = 1 - settings.echoFadeRate;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-cyan-400 bg-cyan-950/20 border-cyan-800/60 shadow-[0_0_12px_rgba(34,211,238,0.25)]';
+      }
+      case 'motionThreshold': {
+        const val = 135 - settings.motionThreshold;
+        const p = (val - 15) / 105;
+        if (p < 0.1) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-emerald-400 bg-emerald-950/20 border-emerald-805/60 shadow-[0_0_12px_rgba(52,211,153,0.25)]';
+      }
+      case 'blurAmount': {
+        const p = settings.blurAmount / 20;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-purple-400 bg-purple-950/20 border-purple-800/60 shadow-[0_0_12px_rgba(192,132,252,0.25)]';
+      }
+      case 'hueRotate': {
+        if (settings.hueRotate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'bg-neutral-950/40 border-neutral-700/60 shadow-[0_0_12px_rgba(255,255,255,0.15)]';
+      }
+      case 'feedbackZoom': {
+        const p = Math.abs(settings.feedbackZoom - 1.0) / 0.1;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-amber-400 bg-amber-950/20 border-amber-800/60 shadow-[0_0_12px_rgba(251,191,36,0.25)]';
+      }
+      case 'strobeRate': {
+        if (settings.strobeRate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-rose-400 bg-rose-950/20 border-rose-800/60 shadow-[0_0_12px_rgba(251,113,133,0.25)]';
+      }
+      default:
+        return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    <div 
+      className="w-full h-full relative bg-black"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* 1. Main Interactive Camera Viewport */}
-      <div className="lg:col-span-8 flex flex-col gap-4 sticky top-6 z-10">
+      
         <div
           ref={containerRef}
-          className={`relative bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex items-center justify-center aspect-video shadow-2xl transition-all duration-300 ${
-            isFullscreen ? 'fixed inset-0 z-50 rounded-none border-none' : ''
+          className={`absolute inset-0 z-0 bg-black flex items-center justify-center transition-all duration-300 ${
+            isFullscreen ? 'fixed inset-0 z-50' : ''
           }`}
         >
           {/* Unused raw video element (hidden offscreen, feed processed on canvas) */}
@@ -608,9 +1176,19 @@ export default function TrackingCanvas() {
             id="effects-viewport"
           />
 
+          {isDragging && cameraActive && (
+            <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+              <div className="bg-blue-600 text-white px-8 py-4 rounded-full font-medium shadow-2xl scale-110">
+                 Drop video to load
+              </div>
+            </div>
+          )}
+
           {!cameraActive && (
-            <div className="flex flex-col items-center justify-center p-8 text-center max-w-sm gap-4">
-              <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-emerald-400 border border-emerald-500/20">
+            <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center p-8 text-center w-[400px] max-w-[90vw] gap-4 backdrop-blur-xl shadow-2xl rounded transition-all duration-200 border ${
+              isDragging ? 'bg-blue-900/40 border-blue-500 scale-105' : 'bg-neutral-900/95 border-neutral-800'
+            }`}>
+              <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-blue-400 border border-neutral-700/50">
                 {videoSourceMode === 'camera' ? (
                   <Camera className="w-8 h-8 animate-pulse" />
                 ) : (
@@ -626,12 +1204,12 @@ export default function TrackingCanvas() {
                 </p>
               </div>
 
-              <div className="w-full flex bg-neutral-950/50 p-1 rounded-xl border border-neutral-800/80 mt-2">
+              <div className="w-full flex bg-neutral-950 p-1 rounded-sm border border-neutral-800 mt-2">
                 <button
                   onClick={() => setVideoSourceMode('camera')}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'camera'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
+                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
                       : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
                   }`}
                 >
@@ -641,7 +1219,7 @@ export default function TrackingCanvas() {
                   onClick={() => setVideoSourceMode('file')}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'file'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm'
+                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
                       : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
                   }`}
                 >
@@ -655,7 +1233,7 @@ export default function TrackingCanvas() {
                     <select
                       value={selectedDeviceId}
                       onChange={(e) => setSelectedDeviceId(e.target.value)}
-                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-emerald-500 transition-all"
+                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
                     >
                       {devices.map((device) => (
                         <option key={device.deviceId} value={device.deviceId}>
@@ -667,7 +1245,7 @@ export default function TrackingCanvas() {
                     <button
                       onClick={startCamera}
                       disabled={cameraLoading}
-                      className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-neutral-950 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 disabled:opacity-50"
+                      className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50"
                     >
                       {cameraLoading ? 'Starting Stream...' : 'Initialize Camera'}
                     </button>
@@ -678,17 +1256,42 @@ export default function TrackingCanvas() {
                   </p>
                 )
               ) : (
-                <div className="w-full flex flex-col gap-2">
-                  <input 
-                    type="file" 
-                    accept="video/*" 
-                    onChange={handleFileSelected} 
-                    className="w-full text-sm text-neutral-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-emerald-500/10 file:text-emerald-400 hover:file:bg-emerald-500/20"
-                  />
+                <div className="w-full flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Quick Test</span>
+                    <button
+                      onClick={loadDemoVideo}
+                      className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-2 border ${
+                        isDemoSelected 
+                          ? 'bg-blue-500/15 text-blue-400 border-blue-500/40 shadow-sm shadow-blue-500/5' 
+                          : 'bg-neutral-800/60 text-neutral-300 border-neutral-700/50 hover:bg-neutral-800 hover:text-white'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      {isDemoSelected ? 'Demo Video Selected' : 'Load Demo Juggling Video'}
+                    </button>
+                  </div>
+
+                  <div className="relative flex py-1 items-center justify-center">
+                    <div className="flex-grow border-t border-neutral-800/60"></div>
+                    <span className="flex-shrink mx-3 text-[10px] text-neutral-500 font-mono tracking-widest">OR</span>
+                    <div className="flex-grow border-t border-neutral-800/60"></div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Upload Your Own</span>
+                    <input 
+                      type="file" 
+                      accept="video/*" 
+                      onChange={handleFileSelected} 
+                      className="w-full text-xs text-neutral-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-neutral-800 file:text-neutral-300 hover:file:bg-neutral-700 hover:file:text-white file:cursor-pointer cursor-pointer"
+                    />
+                  </div>
+
                   <button
                     onClick={startCamera}
                     disabled={cameraLoading || !videoFileUrl}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-neutral-950 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 disabled:opacity-50"
+                    className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50 mt-1"
                   >
                     {cameraLoading ? 'Starting Video...' : 'Play Video'}
                   </button>
@@ -701,21 +1304,51 @@ export default function TrackingCanvas() {
           {cameraActive && (
             <>
               {/* Top status bar */}
-              <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none">
-                <div className="flex gap-2">
-                  <div className="bg-neutral-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-neutral-800/80 flex items-center gap-2">
+              <div className={`absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 transition-all duration-300 ${isSidebarOpen ? 'lg:pr-[340px]' : ''}`}>
+                <div className="flex flex-col gap-1.5 pointer-events-auto">
+                  <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2 w-fit">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                     <span className="text-xs font-mono font-medium text-neutral-300">LIVE</span>
                     <span className="text-xs text-neutral-500">|</span>
-                    <span className="text-xs font-mono text-emerald-400">{fps} FPS</span>
+                    <span className="text-xs font-mono text-blue-400">{fps} FPS</span>
+                  </div>
+
+                  {/* Active Export Settings HUD */}
+                  <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-800/80 flex flex-col gap-1 text-[9px] font-mono text-neutral-400 w-fit">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                      <span>Format: <span className="text-neutral-200 uppercase">{settings.exportMimeType ? (supportedMimeTypes.find(t => t.mimeType === settings.exportMimeType)?.ext || 'webm') : 'webm'}</span></span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                      <span>FPS: <span className="text-neutral-200">{settings.exportFps} FPS</span></span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      <span>Quality: <span className="text-neutral-200 capitalize">{settings.exportQuality} ({settings.exportQuality === 'ultra' ? '30M' : settings.exportQuality === 'high' ? '15M' : settings.exportQuality === 'medium' ? '8M' : '4M'}bps)</span></span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex gap-2 pointer-events-auto">
+                  {/* Settings toggle */}
+                  <button
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    className={`border p-2 rounded-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
+                      isSidebarOpen 
+                        ? 'bg-blue-600 border-blue-500 text-white' 
+                        : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                    }`}
+                    title={isSidebarOpen ? 'Hide Settings' : 'Show Settings'}
+                  >
+                    <Sliders className="w-4 h-4" />
+                    <span className="hidden sm:inline text-xs font-medium">Settings</span>
+                  </button>
+
                   {/* Full screen toggle */}
                   <button
                     onClick={toggleFullscreen}
-                    className="bg-neutral-950/85 backdrop-blur-md border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95"
+                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95 cursor-pointer"
                     title={isFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'}
                   >
                     {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -723,7 +1356,7 @@ export default function TrackingCanvas() {
 
                   <button
                     onClick={stopCamera}
-                    className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 hover:bg-rose-500 text-rose-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 flex items-center gap-1.5"
+                    className="bg-rose-500/20 backdrop-blur-md border border-rose-500/30 hover:bg-rose-500 text-rose-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
                     Stop
@@ -732,7 +1365,7 @@ export default function TrackingCanvas() {
               </div>
 
               {/* Bottom control bar (Recording controls) */}
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-950/90 backdrop-blur-md px-4 py-2 rounded-full border border-neutral-800/90 pointer-events-auto shadow-2xl">
+              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-900 px-4 py-2 rounded border border-neutral-800 pointer-events-auto shadow-2xl z-20">
                 {isRecording ? (
                   <button
                     onClick={stopRecording}
@@ -741,14 +1374,32 @@ export default function TrackingCanvas() {
                     <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
                     <span>Stop ({formatTime(recordingSeconds)})</span>
                   </button>
-                ) : (
+                ) : !exportConfigured ? (
                   <button
-                    onClick={startRecording}
-                    className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-neutral-950 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/10"
+                    onClick={() => setShowExportModal(true)}
+                    className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white active:scale-95 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all border border-amber-500/30"
+                    title="Configure Export Settings"
                   >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>Record Overlay</span>
+                    <Sliders className="w-3.5 h-3.5 font-sans" />
+                    <span className="font-sans">Configure Export Quality First</span>
                   </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={startRecording}
+                      className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10 font-sans"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Record Overlay</span>
+                    </button>
+                    <button
+                      onClick={() => setShowExportModal(true)}
+                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
+                      title="Adjust Export Quality Settings"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
 
                 {settings.showDebugFeed && (
@@ -761,9 +1412,10 @@ export default function TrackingCanvas() {
           )}
         </div>
 
-        {/* 2. Calibration Instructions */}
-        <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-4 flex gap-3.5 items-start">
-          <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20 mt-0.5 shrink-0">
+        {/* Calibration Instructions (Hidden in Pro Layout) */}
+        <div className="hidden">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex gap-3.5 items-start">
+          <div className="p-2 bg-blue-500/10 rounded-sm text-blue-400 border border-neutral-700/50 mt-0.5 shrink-0">
             <Info className="w-5 h-5" />
           </div>
           <div>
@@ -777,6 +1429,139 @@ export default function TrackingCanvas() {
             </p>
           </div>
         </div>
+        </div>
+
+        {/* Export Settings Modal */}
+        <AnimatePresence>
+          {showExportModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 pointer-events-auto"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-xl p-6 flex flex-col gap-5 shadow-2xl font-sans"
+              >
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-blue-400" />
+                    <h3 className="font-semibold text-sm text-neutral-200">
+                      Configure Export Quality
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowExportModal(false)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-4 font-sans">
+                  {/* Export Framerate */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
+                      <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      {[30, 60].map((fpsVal) => (
+                        <button
+                          key={fpsVal}
+                          type="button"
+                          onClick={() => setSettings((prev) => ({ ...prev, exportFps: fpsVal as 30 | 60 }))}
+                          className={`py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                            settings.exportFps === fpsVal
+                              ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
+                              : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
+                          }`}
+                        >
+                          {fpsVal} FPS
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Export Quality / Bitrate */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
+                      <span className="text-[10px] text-neutral-500">Higher bitrates prevent pixelation in high motion.</span>
+                    </div>
+                    <select
+                      value={settings.exportQuality}
+                      onChange={(e) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
+                        }))
+                      }
+                      className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                    >
+                      <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
+                      <option value="high">High (15 Mbps - Premium/Clear)</option>
+                      <option value="medium">Medium (8 Mbps - Balanced)</option>
+                      <option value="standard">Standard (4 Mbps - Compact)</option>
+                    </select>
+                  </div>
+
+                  {/* Container & Codec format */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
+                      <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
+                    </div>
+                    {supportedMimeTypes.length > 0 ? (
+                      <select
+                        value={settings.exportMimeType}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
+                        }
+                        className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                      >
+                        {supportedMimeTypes.map((t) => (
+                          <option key={t.mimeType} value={t.mimeType}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
+                        No supported recording codecs detected.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 border-t border-neutral-800 pt-4 mt-1 font-sans">
+                  <button
+                    onClick={() => {
+                      setExportConfigured(true);
+                      setShowExportModal(false);
+                    }}
+                    className="flex-1 bg-neutral-800 hover:bg-neutral-750 text-neutral-300 py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98]"
+                  >
+                    Save Settings
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportConfigured(true);
+                      setShowExportModal(false);
+                      setTimeout(() => startRecording(), 100);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
+                  >
+                    Apply & Start
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* 3. Exported Video Preview / Download Card */}
         <AnimatePresence>
@@ -785,7 +1570,7 @@ export default function TrackingCanvas() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4 shadow-xl"
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] max-w-[90vw] bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4 shadow-2xl z-50"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -803,7 +1588,7 @@ export default function TrackingCanvas() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                <div className="md:col-span-8 overflow-hidden rounded-xl bg-black border border-neutral-800 aspect-video">
+                <div className="md:col-span-8 overflow-hidden rounded-sm bg-black border border-neutral-800 aspect-video">
                   <video
                     src={recordedVideoUrl}
                     controls
@@ -811,16 +1596,31 @@ export default function TrackingCanvas() {
                   />
                 </div>
 
-                <div className="md:col-span-4 flex flex-col gap-2.5">
+                <div className="md:col-span-4 flex flex-col gap-3">
                   <p className="text-xs text-neutral-400 leading-relaxed">
                     This file contains the complete live performance with all trail lines, motion speeds,
                     and trajectory curve mappings baked in.
                   </p>
 
+                  <div className="bg-neutral-950/40 border border-neutral-800/80 rounded p-3 flex flex-col gap-2 font-mono text-[10px] text-neutral-400">
+                    <div className="flex justify-between">
+                      <span>Format:</span>
+                      <span className="text-neutral-200 uppercase">{recordedExt}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Duration:</span>
+                      <span className="text-neutral-200">{recordingSeconds}s</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>File Size:</span>
+                      <span className="text-neutral-200">{(recordedSize / (1024 * 1024)).toFixed(2)} MB</span>
+                    </div>
+                  </div>
+
                   <a
                     href={recordedVideoUrl}
-                    download={`juggling_tracking_${Date.now()}.webm`}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-neutral-950 font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-emerald-500/10"
+                    download={`juggling_tracking_${Date.now()}.${recordedExt}`}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Download Video
@@ -830,27 +1630,415 @@ export default function TrackingCanvas() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
 
-      {/* 2. Control Panel & Fine-tuning Sliders */}
-      <div className="lg:col-span-4 flex flex-col gap-5">
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+      {/* Floating Settings toggle for when camera is not active */}
+      {!cameraActive && !isSidebarOpen && (
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="absolute top-14 right-4 z-20 bg-[#0a0a0a]/90 hover:bg-neutral-900 border border-neutral-800 text-neutral-200 py-2 px-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
+        >
+          <Sliders className="w-4 h-4 text-blue-400" />
+          <span className="text-xs font-semibold tracking-wider font-sans">Settings</span>
+        </button>
+      )}
+
+      {/* 3. Pro Mode Mobile Tuner Overlay (only visible when camera is active and sidebar is closed) */}
+      {cameraActive && !isSidebarOpen && (
+        <div className="absolute bottom-28 left-4 right-4 z-20 pointer-events-none flex flex-col items-center gap-3 md:hidden">
+          <AnimatePresence>
+            {activeTunerKey && (() => {
+              const item = tunerSettings.find(s => s.key === activeTunerKey);
+              if (!item) return null;
+              const Icon = item.icon;
+              const value = item.getValue();
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                  transition={{ type: 'spring', damping: 20, stiffness: 180 }}
+                  className="bg-[#0a0a0a]/95 backdrop-blur-xl border border-neutral-800/80 rounded-2xl px-4 py-3.5 w-full max-w-[280px] flex flex-col gap-2.5 shadow-2xl pointer-events-auto font-sans"
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 text-neutral-300">
+                      <Icon className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{item.name}</span>
+                    </div>
+                    <span 
+                      className="font-mono text-[11px]"
+                      style={item.key === 'hueRotate' && settings.hueRotate > 0 ? { color: `hsl(${settings.hueRotate}, 85%, 65%)` } : { color: '#e5e5e5' }}
+                    >
+                      {item.format(value)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={item.min}
+                    max={item.max}
+                    step={item.step}
+                    value={value}
+                    onChange={(e) => item.setValue(parseFloat(e.target.value))}
+                    className="w-full accent-blue-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer mt-1"
+                  />
+                </motion.div>
+              );
+            })()}
+          </AnimatePresence>
+
+          <div className="bg-[#050505]/95 backdrop-blur-md border border-neutral-900 rounded-full px-2.5 py-1.5 flex items-center gap-2 shadow-2xl pointer-events-auto">
+            {tunerSettings.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTunerKey === item.key;
+              const colorClass = getSettingColor(item.key);
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => setActiveTunerKey(isActive ? null : item.key)}
+                  className={`w-10 h-10 rounded-full border transition-all flex items-center justify-center cursor-pointer ${
+                    isActive 
+                      ? 'bg-blue-600 border-blue-500 text-white scale-110 shadow-lg shadow-blue-500/25 z-10' 
+                      : colorClass
+                  }`}
+                  style={item.key === 'hueRotate' && settings.hueRotate > 0 && !isActive ? { color: `hsl(${settings.hueRotate}, 85%, 65%)`, borderColor: `hsla(${settings.hueRotate}, 85%, 65%, 0.3)` } : undefined}
+                  title={item.name}
+                >
+                  <Icon className="w-4 h-4" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 2. Control Panel Sidebar */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'tween', duration: 0.2 }}
+            className="absolute right-0 top-10 bottom-0 w-full sm:w-80 bg-[#0a0a0a]/95 backdrop-blur-2xl border-l border-neutral-800 z-30 flex flex-col shadow-2xl"
+          >
+            {/* Sidebar Header with Close Button */}
+            <div className="flex items-center justify-between border-b border-neutral-800 p-4 pb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-blue-400" />
+                <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                  Settings Panel
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/80 p-1.5 rounded-lg transition-all cursor-pointer"
+                title="Close Settings"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto flex flex-col gap-5 p-4 pt-1">
+              {/* Quick Presets Section */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-blue-400" />
+                    <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      Quick Visual Presets
+                    </h3>
+                  </div>
+                  {originalSettings && (
+                    <button
+                      onClick={resetToOriginalSettings}
+                      className="text-[10px] text-red-400 hover:text-red-300 transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Reset to Manual
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  {QUICK_PRESETS.map((preset) => {
+                    const isApplied = appliedPresetId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => applyPreset(preset.id, preset.settings)}
+                        className={`flex flex-col text-left p-3 rounded border text-xs transition-all relative overflow-hidden group cursor-pointer active:scale-97 select-none ${
+                          isApplied
+                            ? 'bg-neutral-800/80 border-blue-500 shadow-md shadow-blue-500/5'
+                            : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700/80 hover:bg-neutral-800/30'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1 mb-1">
+                          <span className={`font-semibold transition-colors ${isApplied ? 'text-blue-400' : 'text-neutral-200 group-hover:text-white'}`}>
+                            {preset.name}
+                          </span>
+                          {preset.id === 'led' && <Zap className={`w-3.5 h-3.5 ${isApplied ? 'text-amber-400' : 'text-amber-500/50 group-hover:text-amber-400'}`} />}
+                          {preset.id === 'cyberpunk' && <Sparkles className={`w-3.5 h-3.5 ${isApplied ? 'text-pink-400' : 'text-pink-500/50 group-hover:text-pink-400'}`} />}
+                          {preset.id === 'smoke' && <Wind className={`w-3.5 h-3.5 ${isApplied ? 'text-teal-400' : 'text-teal-500/50 group-hover:text-teal-400'}`} />}
+                          {preset.id === 'strobe' && <Activity className={`w-3.5 h-3.5 ${isApplied ? 'text-cyan-400' : 'text-cyan-500/50 group-hover:text-cyan-400'}`} />}
+                          {preset.id === 'vortex' && <Infinity className={`w-3.5 h-3.5 ${isApplied ? 'text-indigo-400' : 'text-indigo-500/50 group-hover:text-indigo-400'}`} />}
+                          {preset.id === 'cascade' && <Moon className={`w-3.5 h-3.5 ${isApplied ? 'text-purple-400' : 'text-purple-500/50 group-hover:text-purple-400'}`} />}
+                        </div>
+                        <p className="text-[10px] text-neutral-400 leading-normal mb-2 shrink-0">
+                          {preset.description}
+                        </p>
+                        
+                        <div className="flex flex-wrap gap-1 mt-auto">
+                          {Object.entries(preset.settings)
+                            .map(([k, v]) => getSettingDisplayName(k, v))
+                            .filter(Boolean)
+                            .slice(0, 3) // show top 3 settings to keep it clean
+                            .map((disp, i) => (
+                              <span key={i} className="text-[8px] bg-neutral-950 text-neutral-500 px-1.5 py-0.5 rounded font-mono border border-neutral-950">
+                                {disp}
+                              </span>
+                            ))}
+                          {Object.keys(preset.settings).length > 3 && (
+                            <span className="text-[8px] bg-neutral-950 text-neutral-600 px-1 rounded font-mono border border-neutral-950">
+                              +{Object.keys(preset.settings).length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Gemini AI Auto-Tuner (Beta) Collapsible Section */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded overflow-hidden">
+                <button
+                  onClick={() => setGeminiCollapsed(!geminiCollapsed)}
+                  className="w-full flex items-center justify-between p-3.5 font-sans font-semibold text-xs text-neutral-300 hover:text-white transition-all bg-neutral-900/50 hover:bg-neutral-800/20 cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-400" />
+                    <span>AI Scene Auto-Tuner</span>
+                    <span className="text-[8px] font-mono bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 uppercase tracking-wider scale-90">
+                      Beta
+                    </span>
+                  </div>
+                  {geminiCollapsed ? <ChevronDown className="w-4 h-4 text-neutral-500" /> : <ChevronUp className="w-4 h-4 text-neutral-500" />}
+                </button>
+
+                {!geminiCollapsed && (
+                  <div className="p-4 pt-1 border-t border-neutral-800/60 flex flex-col gap-4 animate-slideDown">
+                    {!geminiActive && !hasEnvApiKey ? (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-xs text-neutral-400 leading-relaxed">
+                          Configure your Gemini API key to auto-tune sensitivity, light-tracking, and artistic settings using frame analysis.
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[9px] text-neutral-500 font-mono uppercase tracking-wider">
+                            Gemini API Key
+                          </label>
+                          <input
+                            type="password"
+                            placeholder="AIzaSy..."
+                            value={apiKeyInput}
+                            onChange={(e) => setApiKeyInput(e.target.value)}
+                            className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-500 transition-all font-mono"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSaveApiKey(apiKeyInput)}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs py-2 px-3 rounded transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <Key className="w-3.5 h-3.5" />
+                          Save API Key
+                        </button>
+                        <a
+                          href="https://aistudio.google.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-blue-400 hover:underline text-center mt-1"
+                        >
+                          Get a free API Key from Google AI Studio &rarr;
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between bg-neutral-950/40 p-2 border border-neutral-800 rounded text-[10px]">
+                          <span className="text-neutral-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            {hasEnvApiKey && !apiKeyInput ? 'Env API Key Active' : 'Custom API Key Active'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              handleSaveApiKey('');
+                            }}
+                            className="text-neutral-500 hover:text-neutral-300 underline cursor-pointer"
+                          >
+                            Reset Key
+                          </button>
+                        </div>
+
+                        {!cameraActive ? (
+                          <div className="text-xs text-neutral-400 text-center py-4 bg-neutral-950/20 border border-dashed border-neutral-800 rounded">
+                            Start camera or load a video file to run analysis.
+                          </div>
+                        ) : (
+                          <button
+                            onClick={runGeminiAnalysis}
+                            disabled={isGeminiAnalyzing}
+                            className={`w-full font-medium text-xs py-2 px-3 rounded transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 ${
+                              isGeminiAnalyzing
+                                ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
+                            }`}
+                          >
+                            {isGeminiAnalyzing ? (
+                              <>
+                                <span className="w-3 h-3 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
+                                Analyzing Scene...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5" />
+                                Analyze Scene
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {geminiError && (
+                          <div className="p-3 bg-red-950/20 border border-red-900/50 rounded flex items-start gap-2 text-xs text-red-400">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <div className="flex-1 leading-relaxed">
+                              <span className="font-semibold block mb-0.5">Analysis failed</span>
+                              {geminiError}
+                            </div>
+                          </div>
+                        )}
+
+                        {geminiAnalysisResult && (
+                          <div className="flex flex-col gap-3 bg-neutral-950/40 border border-neutral-800 rounded p-3 animate-fadeIn">
+                            <div>
+                              <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider block mb-1">
+                                AI Analysis
+                              </span>
+                              <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+                                {geminiAnalysisResult.analysis}
+                              </p>
+                            </div>
+
+                            <div className="h-px bg-neutral-800" />
+
+                            {/* Option A */}
+                            <div className="flex flex-col gap-2 border border-neutral-800 rounded p-2.5 bg-neutral-900/50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-blue-400">
+                                  Option A: {geminiAnalysisResult.optionA.name}
+                                </span>
+                                <span className="text-[9px] font-mono bg-blue-950/30 text-blue-300 border border-blue-800/40 px-1 rounded uppercase">
+                                  Tracking
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                {geminiAnalysisResult.optionA.description}
+                              </p>
+                              <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
+                                {Object.entries(geminiAnalysisResult.optionA.settings)
+                                  .map(([k, v]) => getSettingDisplayName(k, v))
+                                  .filter(Boolean)
+                                  .map((disp, i) => (
+                                    <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                      {disp}
+                                    </span>
+                                  ))}
+                              </div>
+                              <button
+                                onClick={() =>
+                                  applyRecommendedSettings(geminiAnalysisResult.optionA.settings, 'A')
+                                }
+                                className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                  appliedOption === 'A'
+                                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                                    : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                }`}
+                              >
+                                {appliedOption === 'A' ? (
+                                  <>
+                                    <Check className="w-3 h-3" />
+                                    Option A Applied
+                                  </>
+                                ) : (
+                                  'Apply Option A Settings'
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Option B */}
+                            <div className="flex flex-col gap-2 border border-neutral-800 rounded p-2.5 bg-neutral-900/50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-purple-400">
+                                  Option B: {geminiAnalysisResult.optionB.name}
+                                </span>
+                                <span className="text-[9px] font-mono bg-purple-950/30 text-purple-300 border border-purple-800/40 px-1 rounded uppercase">
+                                  Artistic
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                {geminiAnalysisResult.optionB.description}
+                              </p>
+                              <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
+                                {Object.entries(geminiAnalysisResult.optionB.settings)
+                                  .map(([k, v]) => getSettingDisplayName(k, v))
+                                  .filter(Boolean)
+                                  .map((disp, i) => (
+                                    <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                      {disp}
+                                    </span>
+                                  ))}
+                              </div>
+                              <button
+                                onClick={() =>
+                                  applyRecommendedSettings(geminiAnalysisResult.optionB.settings, 'B')
+                                }
+                                className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                  appliedOption === 'B'
+                                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                                    : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                }`}
+                              >
+                                {appliedOption === 'B' ? (
+                                  <>
+                                    <Check className="w-3 h-3" />
+                                    Option B Applied
+                                  </>
+                                ) : (
+                                  'Apply Option B Settings'
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Activity className="w-4 h-4 text-emerald-400" />
+            <Activity className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               LED Echo Trails
             </h3>
           </div>
           
           <div className="flex flex-col gap-4 py-2">
-            <div className="p-3 bg-neutral-950/40 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-              <Sparkles className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-emerald-400/90 leading-relaxed">
+            <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-neutral-300 leading-relaxed">
                 Pixel-perfect masking extracts moving props and stamps them into an echo buffer. The trail matches the exact shape, brightness, and colors of your flow prop at each frame.
               </p>
             </div>
 
-            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-xl hover:border-neutral-700/60 transition-all">
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
               <div className="flex flex-col">
                 <span className="font-medium">Enable Motion Trails</span>
                 <span className="text-[10px] text-neutral-500">Stamp and draw moving paths on the screen</span>
@@ -863,13 +2051,16 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
             
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Mask Sensitivity</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Mask Sensitivity
+                  </span>
                   <span className="text-[10px] text-neutral-500">Controls how much motion is picked up by the camera.</span>
                 </div>
                 <span className="text-neutral-200 font-mono shrink-0 text-right">{100 - settings.motionThreshold}%</span>
@@ -883,7 +2074,7 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, motionThreshold: 135 - parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
                 <span>Less (Ignores noise)</span>
@@ -891,10 +2082,53 @@ export default function TrackingCanvas() {
               </div>
             </div>
 
+            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all mt-2">
+              <div className="flex flex-col">
+                <span className="font-medium">Filter by Brightness</span>
+                <span className="text-[10px] text-neutral-500">Only track bright moving objects (e.g. LED props)</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.enableLightTracking}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, enableLightTracking: e.target.checked }))
+                }
+                className="sr-only peer"
+              />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
+            </label>
+
+            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableLightTracking ? 'hidden' : ''}`}>
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Eye className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Brightness Threshold
+                  </span>
+                  <span className="text-[10px] text-neutral-500">Minimum brightness to track.</span>
+                </div>
+                <span className="text-neutral-200 font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="255"
+                step="1"
+                value={settings.lightThreshold}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, lightThreshold: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
             <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Echo Trail Length</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Waves className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Echo Trail Length
+                  </span>
                   <span className="text-[10px] text-neutral-500">How long the trail persists before fading away.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">
@@ -915,14 +2149,17 @@ export default function TrackingCanvas() {
                   const retention = parseInt(e.target.value);
                   setSettings((prev) => ({ ...prev, echoFadeRate: 1 - (retention / 100) }));
                 }}
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Trail Blur Amount</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Trail Blur Amount
+                  </span>
                   <span className="text-[10px] text-neutral-500">Applies a soft glow-like blur to the trails.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.blurAmount}px</span>
@@ -936,14 +2173,62 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, blurAmount: parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
 
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Color Hue Shift</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Smear Edges
+                  </span>
+                  <span className="text-[10px] text-neutral-500">Applies a spatial blur (creates a glowing cloud if set too high).</span>
+                </div>
+                <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                value={settings.lineSmoothness}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, lineSmoothness: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 mt-2">
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400">Shape Anti-Aliasing</span>
+                  <span className="text-[10px] text-neutral-500">Smooths pixelated staircases on mask edges perfectly without smearing the shape.</span>
+                </div>
+                <span className="text-neutral-200 font-mono">{settings.edgeAntiAliasing}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="500"
+                step="5"
+                value={settings.edgeAntiAliasing}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, edgeAntiAliasing: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 mt-2">
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Color Hue Shift
+                  </span>
                   <span className="text-[10px] text-neutral-500">Shifts the colors of the trail permanently.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.hueRotate}°</span>
@@ -957,7 +2242,7 @@ export default function TrackingCanvas() {
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, hueRotate: parseInt(e.target.value) }))
                 }
-                className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />
             </div>
             
@@ -976,7 +2261,7 @@ export default function TrackingCanvas() {
                     setSettings((prev) => ({ ...prev, enableTrails: true, compositeMode: val }));
                   }
                 }}
-                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-emerald-500 transition-all"
+                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
               >
                 <option value="none">Disabled (No Trails)</option>
                 <option value="screen">Screen (Glow)</option>
@@ -989,9 +2274,9 @@ export default function TrackingCanvas() {
         </div>
 
         {/* Cinematic Effects */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <Sparkles className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               Cinematic Effects
             </h3>
@@ -1000,7 +2285,10 @@ export default function TrackingCanvas() {
           <div className="flex flex-col gap-1.5 mt-1">
             <div className="flex justify-between text-xs">
               <div className="flex flex-col">
-                <span className="text-neutral-400">Chronophotography (Strobe)</span>
+                <span className="text-neutral-400 flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-neutral-400/80" />
+                  Chronophotography (Strobe)
+                </span>
                 <span className="text-[10px] text-neutral-500">Captures distinct snapshot frames instead of a continuous trail.</span>
               </div>
               <span className="text-neutral-200 font-mono shrink-0 text-right">
@@ -1016,8 +2304,28 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, strobeRate: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
+
+            {settings.strobeRate > 0 && (
+              <div className="flex items-center justify-between gap-4 mt-2 p-2.5 rounded-lg bg-neutral-950/40 border border-neutral-800/60 transition-all duration-300">
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-medium text-neutral-300">Strobe Style</span>
+                  <span className="text-[9px] text-neutral-500 leading-tight">Choose how frames behave between updates.</span>
+                </div>
+                <select
+                  value={settings.strobeMode}
+                  onChange={(e) => {
+                    const val = e.target.value as 'freeze' | 'flash';
+                    setSettings((prev) => ({ ...prev, strobeMode: val }));
+                  }}
+                  className="bg-neutral-800 text-[11px] text-neutral-200 border border-neutral-700 px-2 py-1.5 rounded-md outline-none cursor-pointer focus:border-blue-500 transition-all"
+                >
+                  <option value="freeze">Freeze Frame (Posterize)</option>
+                  <option value="flash">Blackout Flash (Strobe Light)</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5 mt-2">
@@ -1039,7 +2347,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, colorCycleSpeed: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1060,7 +2368,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, verticalDrift: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
           
@@ -1081,14 +2389,17 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, horizontalDrift: parseInt(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
           <div className="flex flex-col gap-1.5 mt-2 mb-2">
             <div className="flex justify-between text-xs">
               <div className="flex flex-col">
-                <span className="text-neutral-400">Feedback Loop (Zoom)</span>
+                <span className="text-neutral-400 flex items-center gap-1.5">
+                  <Maximize2 className="w-3.5 h-3.5 text-neutral-400/80" />
+                  Feedback Loop (Zoom)
+                </span>
                 <span className="text-[10px] text-neutral-500">Scales the trail up/down for an infinite zoom.</span>
               </div>
               <span className="text-neutral-200 font-mono shrink-0 text-right">
@@ -1104,7 +2415,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, feedbackZoom: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
 
@@ -1127,15 +2438,15 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, motionBlur: parseFloat(e.target.value) }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
           </div>
         </div>
 
         {/* Universal settings */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col gap-4">
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-            <Sliders className="w-4 h-4 text-emerald-400" />
+            <Sliders className="w-4 h-4 text-blue-400" />
             <h3 className="font-sans font-semibold text-sm text-neutral-200">
               Advanced Settings
             </h3>
@@ -1158,7 +2469,7 @@ export default function TrackingCanvas() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, bgLearningRate: parseInt(e.target.value) / 100 }))
               }
-              className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
               <span>Stable</span>
@@ -1181,7 +2492,7 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
 
             <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
@@ -1197,7 +2508,7 @@ export default function TrackingCanvas() {
                 }
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
 
             <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
@@ -1218,11 +2529,14 @@ export default function TrackingCanvas() {
                 }}
                 className="sr-only peer"
               />
-              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-neutral-950" />
+              <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
             </label>
           </div>
         </div>
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

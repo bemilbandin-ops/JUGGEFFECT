@@ -8,7 +8,10 @@ export function updateBackgroundAndExtractMotion(
   outputData: ImageData,
   threshold: number,
   bgLearningRate: number = 0.05,
-  invertColors: boolean = false
+  invertColors: boolean = false,
+  enableLightTracking: boolean = false,
+  lightThreshold: number = 200,
+  edgeAntiAliasing: number = 0
 ) {
   const len = currData.data.length;
   const c = currData.data;
@@ -21,12 +24,33 @@ export function updateBackgroundAndExtractMotion(
     // RGB sum difference
     const diff = Math.abs(c[i] - bgData[i]) + Math.abs(c[i+1] - bgData[i+1]) + Math.abs(c[i+2] - bgData[i+2]);
     
+    let isForeground = false;
     if (diff > threshold) {
-      // Foreground: copy original pixel, set alpha to 255
+      isForeground = true;
+      // Only check brightness if the pixel is already moving!
+      if (enableLightTracking) {
+        const r = c[i], g = c[i+1], b = c[i+2];
+        const brightness = r > g ? (r > b ? r : b) : (g > b ? g : b); // Inline Math.max for speed
+        if (brightness <= lightThreshold) {
+          isForeground = false;
+        }
+      }
+    }
+
+    if (isForeground) {
+      // Calculate anti-aliased alpha
+      let alpha = 255;
+      if (edgeAntiAliasing > 0) {
+        if (diff < threshold + edgeAntiAliasing) {
+           alpha = Math.floor(((diff - threshold) / edgeAntiAliasing) * 255);
+        }
+      }
+
+      // Foreground: copy original pixel, set computed alpha
       o[i] = invertColors ? 255 - c[i] : c[i];
       o[i+1] = invertColors ? 255 - c[i+1] : c[i+1];
       o[i+2] = invertColors ? 255 - c[i+2] : c[i+2];
-      o[i+3] = 255;
+      o[i+3] = alpha;
       
       // Update background slowly
       bgData[i] += (c[i] - bgData[i]) * fgRate;
@@ -34,6 +58,9 @@ export function updateBackgroundAndExtractMotion(
       bgData[i+2] += (c[i+2] - bgData[i+2]) * fgRate;
     } else {
       // Background: transparent
+      o[i] = 0;
+      o[i+1] = 0;
+      o[i+2] = 0;
       o[i+3] = 0; 
       
       // Update background normally
