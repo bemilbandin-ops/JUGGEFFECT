@@ -925,10 +925,18 @@ export default function TrackingCanvas() {
                 <span className="text-[10px] text-neutral-500">How new frames blend with older trails.</span>
               </div>
               <select
-                value={settings.compositeMode}
-                onChange={(e) => setSettings(prev => ({ ...prev, compositeMode: e.target.value }))}
+                value={settings.enableTrails ? settings.compositeMode : 'none'}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'none') {
+                    setSettings((prev) => ({ ...prev, enableTrails: false, compositeMode: 'none' }));
+                  } else {
+                    setSettings((prev) => ({ ...prev, enableTrails: true, compositeMode: val }));
+                  }
+                }}
                 className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-emerald-500 transition-all"
               >
+                <option value="none">Disabled (No Trails)</option>
                 <option value="screen">Screen (Glow)</option>
                 <option value="source-over">Normal (Solid)</option>
                 <option value="lighter">Additive (Intense)</option>
