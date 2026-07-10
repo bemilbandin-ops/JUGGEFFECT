@@ -394,7 +394,10 @@ export default function TrackingCanvas() {
       }
 
       // Effect: Trail processing and rendering
-      if (currentSettings.enableTrails) {
+      const isStrobeActive = currentSettings.strobeRate > 0;
+      const shouldProcessTrails = currentSettings.enableTrails || isStrobeActive;
+
+      if (shouldProcessTrails) {
         // Effect: Feedback Zoom and Smoke Drift
         if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
           const tempCanvas = document.createElement('canvas');
@@ -417,8 +420,13 @@ export default function TrackingCanvas() {
           }
         }
 
+        // Determine fade rate (ensure strobe snapshots persist even if retention is set to 0%)
+        const fadeRate = isStrobeActive 
+          ? Math.min(currentSettings.echoFadeRate, 0.15) 
+          : currentSettings.echoFadeRate;
+
         trailCtx.globalCompositeOperation = 'destination-out';
-        trailCtx.fillStyle = `rgba(0, 0, 0, ${currentSettings.echoFadeRate})`;
+        trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
         trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
         
         // Effect: Color Cycle and Stroboscopic rendering
@@ -426,7 +434,7 @@ export default function TrackingCanvas() {
         colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
 
         let shouldStrobe = false;
-        if (currentSettings.strobeRate <= 0) {
+        if (!isStrobeActive) {
           shouldStrobe = true;
         } else {
           if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
@@ -454,7 +462,12 @@ export default function TrackingCanvas() {
           trailCtx.filter = 'none'; // reset filter
         }
 
-        ctx.globalCompositeOperation = (currentSettings.compositeMode as GlobalCompositeOperation) || 'screen';
+        // Determine blend mode (fallback to 'screen' if compositeMode is 'none')
+        const blendMode = (currentSettings.compositeMode === 'none' || !currentSettings.compositeMode)
+          ? 'screen'
+          : currentSettings.compositeMode;
+
+        ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
         ctx.drawImage(trailCanvas, 0, 0, w, h);
         ctx.globalCompositeOperation = 'source-over';
       } else {
@@ -872,7 +885,7 @@ export default function TrackingCanvas() {
               </div>
             </div>
 
-            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableTrails ? 'opacity-40 pointer-events-none' : ''}`}>
+            <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
                   <span className="text-neutral-400">Echo Trail Length</span>
