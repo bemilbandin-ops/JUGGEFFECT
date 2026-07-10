@@ -82,6 +82,7 @@ export default function TrackingCanvas() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
@@ -149,6 +150,31 @@ export default function TrackingCanvas() {
     if (e.target.files && e.target.files[0]) {
       const url = URL.createObjectURL(e.target.files[0]);
       setVideoFileUrl(url);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        setVideoFileUrl(url);
+        setVideoSourceMode('file');
+        if (cameraActive) stopCamera();
+      }
     }
   }
 
@@ -587,7 +613,12 @@ export default function TrackingCanvas() {
   }
 
   return (
-    <div className="w-full h-full relative bg-black">
+    <div 
+      className="w-full h-full relative bg-black"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* 1. Main Interactive Camera Viewport */}
       
         <div
@@ -612,8 +643,18 @@ export default function TrackingCanvas() {
             id="effects-viewport"
           />
 
+          {isDragging && cameraActive && (
+            <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+              <div className="bg-blue-600 text-white px-8 py-4 rounded-full font-medium shadow-2xl scale-110">
+                 Drop video to load
+              </div>
+            </div>
+          )}
+
           {!cameraActive && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center p-8 text-center w-[400px] max-w-[90vw] gap-4 bg-neutral-900/95 backdrop-blur-xl border border-neutral-800 shadow-2xl rounded">
+            <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center p-8 text-center w-[400px] max-w-[90vw] gap-4 backdrop-blur-xl shadow-2xl rounded transition-all duration-200 border ${
+              isDragging ? 'bg-blue-900/40 border-blue-500 scale-105' : 'bg-neutral-900/95 border-neutral-800'
+            }`}>
               <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-blue-400 border border-neutral-700/50">
                 {videoSourceMode === 'camera' ? (
                   <Camera className="w-8 h-8 animate-pulse" />
