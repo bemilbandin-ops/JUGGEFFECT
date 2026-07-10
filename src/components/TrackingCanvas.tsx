@@ -74,6 +74,9 @@ export default function TrackingCanvas() {
     motionBlur: 0,
     lineSmoothness: 0,
     edgeAntiAliasing: 30,
+    exportQuality: 'high',
+    exportFps: 30,
+    exportMimeType: '',
   });
 
   const settingsRef = useRef(settings);
@@ -85,10 +88,40 @@ export default function TrackingCanvas() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
+  const [recordedExt, setRecordedExt] = useState<string>('webm');
+  const [recordedSize, setRecordedSize] = useState<number>(0);
+  const [supportedMimeTypes, setSupportedMimeTypes] = useState<{ label: string; mimeType: string; ext: string }[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+
+  // Detect browser supported video codecs
+  useEffect(() => {
+    const candidates = [
+      { label: 'WebM (VP9) - Ultra Quality', mimeType: 'video/webm;codecs=vp9,opus', ext: 'webm' },
+      { label: 'WebM (H.264) - High Compatibility', mimeType: 'video/webm;codecs=h264,opus', ext: 'webm' },
+      { label: 'WebM (VP8)', mimeType: 'video/webm;codecs=vp8,opus', ext: 'webm' },
+      { label: 'MP4 (H.264) - Apple/Standard', mimeType: 'video/mp4;codecs=h264,aac', ext: 'mp4' },
+      { label: 'MP4 (AAC)', mimeType: 'video/mp4', ext: 'mp4' },
+      { label: 'Matroska (MKV)', mimeType: 'video/x-matroska;codecs=avc1', ext: 'mkv' },
+      { label: 'WebM (Default)', mimeType: 'video/webm', ext: 'webm' }
+    ];
+    const supported = candidates.filter(candidate => {
+      try {
+        return MediaRecorder.isTypeSupported(candidate.mimeType);
+      } catch (e) {
+        return false;
+      }
+    });
+    setSupportedMimeTypes(supported);
+    if (supported.length > 0) {
+      setSettings(prev => ({
+        ...prev,
+        exportMimeType: prev.exportMimeType || supported[0].mimeType
+      }));
+    }
+  }, []);
 
   // Initialize and list camera devices
   useEffect(() => {
@@ -568,8 +601,9 @@ export default function TrackingCanvas() {
     setRecordedVideoUrl(null);
     recordedChunksRef.current = [];
 
-    // Capture the processed canvas stream (matching whatever frame rate, ideal 30/60fps)
-    const stream = canvas.captureStream(30);
+    // Capture the processed canvas stream at the user's selected frame rate
+    const targetFps = settings.exportFps || 30;
+    const stream = canvas.captureStream(targetFps);
 
     // Request audio stream from user mic if enabled
     if (settings.enableAudioSync) {
@@ -583,14 +617,31 @@ export default function TrackingCanvas() {
       }
     }
 
-    // Initialize media recorder
-    const options = { mimeType: 'video/webm;codecs=vp9,opus' };
+    // Initialize media recorder with selected bitrate and codec options
+    const bitrates = {
+      ultra: 30000000,   // 30 Mbps
+      high: 15000000,    // 15 Mbps
+      medium: 8000000,   // 8 Mbps
+      standard: 4000000, // 4 Mbps
+    };
+    const targetBitrate = bitrates[settings.exportQuality] || 15000000;
+    const selectedMime = settings.exportMimeType || 'video/webm';
+
+    const options = {
+      mimeType: selectedMime,
+      videoBitsPerSecond: targetBitrate,
+    };
+
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(stream, options);
     } catch (e) {
-      // Fallback if VP9 not fully supported
-      recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      console.warn('Selected encoding parameters not supported, trying mimeType only:', e);
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: selectedMime });
+      } catch (e2) {
+        recorder = new MediaRecorder(stream);
+      }
     }
 
     recorder.ondataavailable = (event) => {
@@ -600,9 +651,21 @@ export default function TrackingCanvas() {
     };
 
     recorder.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const mimeType = recorder.mimeType || selectedMime;
+      
+      // Determine the extension based on recorded mimeType
+      let ext = 'webm';
+      if (mimeType.includes('mp4')) {
+        ext = 'mp4';
+      } else if (mimeType.includes('matroska') || mimeType.includes('mkv')) {
+        ext = 'mkv';
+      }
+      
+      const blob = new Blob(recordedChunksRef.current, { type: mimeType });
       const url = URL.createObjectURL(blob);
       setRecordedVideoUrl(url);
+      setRecordedExt(ext);
+      setRecordedSize(blob.size);
     };
 
     mediaRecorderRef.current = recorder;
@@ -851,6 +914,7 @@ export default function TrackingCanvas() {
           </div>
         </div>
         </div>
+
         {/* 3. Exported Video Preview / Download Card */}
         <AnimatePresence>
           {recordedVideoUrl && (
@@ -884,15 +948,30 @@ export default function TrackingCanvas() {
                   />
                 </div>
 
-                <div className="md:col-span-4 flex flex-col gap-2.5">
+                <div className="md:col-span-4 flex flex-col gap-3">
                   <p className="text-xs text-neutral-400 leading-relaxed">
                     This file contains the complete live performance with all trail lines, motion speeds,
                     and trajectory curve mappings baked in.
                   </p>
 
+                  <div className="bg-neutral-950/40 border border-neutral-800/80 rounded p-3 flex flex-col gap-2 font-mono text-[10px] text-neutral-400">
+                    <div className="flex justify-between">
+                      <span>Format:</span>
+                      <span className="text-neutral-200 uppercase">{recordedExt}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Duration:</span>
+                      <span className="text-neutral-200">{recordingSeconds}s</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>File Size:</span>
+                      <span className="text-neutral-200">{(recordedSize / (1024 * 1024)).toFixed(2)} MB</span>
+                    </div>
+                  </div>
+
                   <a
                     href={recordedVideoUrl}
-                    download={`juggling_tracking_${Date.now()}.webm`}
+                    download={`juggling_tracking_${Date.now()}.${recordedExt}`}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -1280,6 +1359,92 @@ export default function TrackingCanvas() {
               }
               className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
+          </div>
+        </div>
+
+        {/* Video Export Settings */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
+            <Download className="w-4 h-4 text-blue-400" />
+            <h3 className="font-sans font-semibold text-sm text-neutral-200">
+              Video Export Settings
+            </h3>
+          </div>
+
+          <div className="flex flex-col gap-4 py-1">
+            {/* Target Framerate */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col">
+                <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
+                <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {[30, 60].map((fpsVal) => (
+                  <button
+                    key={fpsVal}
+                    type="button"
+                    onClick={() => setSettings((prev) => ({ ...prev, exportFps: fpsVal as 30 | 60 }))}
+                    className={`py-1.5 rounded text-xs font-mono font-medium transition-all ${
+                      settings.exportFps === fpsVal
+                        ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
+                        : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
+                    }`}
+                  >
+                    {fpsVal} FPS
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Quality / Bitrate */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col">
+                <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
+                <span className="text-[10px] text-neutral-500">Higher bitrates preserve trail crispness.</span>
+              </div>
+              <select
+                value={settings.exportQuality}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
+                  }))
+                }
+                className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+              >
+                <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
+                <option value="high">High (15 Mbps - Premium/Clear)</option>
+                <option value="medium">Medium (8 Mbps - Balanced)</option>
+                <option value="standard">Standard (4 Mbps - Compact)</option>
+              </select>
+            </div>
+
+            {/* Container & Codec format */}
+            <div className="flex flex-col gap-1.5 font-sans">
+              <div className="flex flex-col">
+                <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
+                <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
+              </div>
+              {supportedMimeTypes.length > 0 ? (
+                <select
+                  value={settings.exportMimeType}
+                  onChange={(e) =>
+                    setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
+                  }
+                  className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                >
+                  {supportedMimeTypes.map((t) => (
+                    <option key={t.mimeType} value={t.mimeType}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
+                  No supported recording codecs detected.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

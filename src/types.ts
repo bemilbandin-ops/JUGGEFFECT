@@ -31,5 +31,8 @@ export interface TrackingSettings {
   motionBlur: number;
   lineSmoothness: number;
   edgeAntiAliasing: number;
+  exportQuality: 'standard' | 'medium' | 'high' | 'ultra';
+  exportFps: 30 | 60;
+  exportMimeType: string;
 }
 
