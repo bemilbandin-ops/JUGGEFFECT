@@ -24,6 +24,7 @@ export interface TrackingSettings {
   showDebugFeed: boolean; // Show binary threshold mask for debugging
   enableAudioSync: boolean; // Sync video sound with mic
   strobeRate: number;
+  strobeMode: 'freeze' | 'flash';
   colorCycleSpeed: number;
   verticalDrift: number;
   horizontalDrift: number;

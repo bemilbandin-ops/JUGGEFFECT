@@ -42,6 +42,7 @@ export default function TrackingCanvas() {
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const smoothingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const strobeVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -76,6 +77,7 @@ export default function TrackingCanvas() {
     showDebugFeed: false,
     enableAudioSync: false,
     strobeRate: 0,
+    strobeMode: 'freeze',
     colorCycleSpeed: 0,
     verticalDrift: 0,
     horizontalDrift: 0,
@@ -407,12 +409,54 @@ export default function TrackingCanvas() {
         blurredVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight); // seed it
       }
 
+      if (!strobeVideoCanvasRef.current) {
+        strobeVideoCanvasRef.current = document.createElement('canvas');
+      }
+      const strobeVideoCanvas = strobeVideoCanvasRef.current;
+      const strobeVideoCtx = strobeVideoCanvas.getContext('2d');
+      if (strobeVideoCanvas.width !== video.videoWidth || strobeVideoCanvas.height !== video.videoHeight) {
+        strobeVideoCanvas.width = video.videoWidth;
+        strobeVideoCanvas.height = video.videoHeight;
+        if (strobeVideoCtx) {
+          strobeVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight); // seed it
+        }
+      }
+
       const w = canvas.width;
       const h = canvas.height;
       const currentSettings = settingsRef.current;
 
+      const isStrobeActive = currentSettings.strobeRate > 0;
+      let isStrobeTriggered = false;
+      if (!isStrobeActive) {
+        isStrobeTriggered = true;
+      } else {
+        if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
+          isStrobeTriggered = true;
+          lastStrobeTimeRef.current = now;
+        }
+      }
+
+      if (isStrobeActive && isStrobeTriggered && strobeVideoCtx) {
+        strobeVideoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+      }
+
       // 2. Draw raw video frame to display canvas
-      ctx.drawImage(video, 0, 0, w, h);
+      if (!isStrobeActive) {
+        ctx.drawImage(video, 0, 0, w, h);
+      } else {
+        if (currentSettings.strobeMode === 'flash') {
+          const flashDuration = 40; // flash duration in ms
+          if (now - lastStrobeTimeRef.current <= flashDuration) {
+            ctx.drawImage(strobeVideoCanvas, 0, 0, w, h);
+          } else {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, w, h);
+          }
+        } else {
+          ctx.drawImage(strobeVideoCanvas, 0, 0, w, h);
+        }
+      }
 
       // 3. Process frame for tracking
       // Draw frame to low-res canvas for high performance (using sharp video)
@@ -503,62 +547,49 @@ export default function TrackingCanvas() {
       }
 
       // Effect: Trail processing and rendering
-      const isStrobeActive = currentSettings.strobeRate > 0;
-      const shouldProcessTrails = currentSettings.enableTrails || isStrobeActive;
+      const shouldProcessTrails = currentSettings.enableTrails;
 
       if (shouldProcessTrails) {
-        // Effect: Feedback Zoom and Smoke Drift
-        if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
-          if (!driftCanvasRef.current) {
-            driftCanvasRef.current = document.createElement('canvas');
-          }
-          const tempCanvas = driftCanvasRef.current;
-          if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
-            tempCanvas.width = trailCanvas.width;
-            tempCanvas.height = trailCanvas.height;
-          }
-          const tempCtx = tempCanvas.getContext('2d');
-          if (tempCtx) {
-            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-            tempCtx.drawImage(trailCanvas, 0, 0);
-            trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-            
-            trailCtx.save();
-            // Center for scaling
-            trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
-            trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
-            trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
-            
-            // Apply drift
-            trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
-            trailCtx.restore();
-          }
-        }
-
-        // Determine fade rate (ensure strobe snapshots persist even if retention is set to 0%)
-        const fadeRate = isStrobeActive 
-          ? Math.min(currentSettings.echoFadeRate, 0.15) 
-          : currentSettings.echoFadeRate;
-
-        trailCtx.globalCompositeOperation = 'destination-out';
-        trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
-        trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
-        
-        // Effect: Color Cycle and Stroboscopic rendering
+        // Effect: Color Cycle updates continuously for smooth hue rotation
         frameCountAbsRef.current++;
         colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
 
-        let shouldStrobe = false;
-        if (!isStrobeActive) {
-          shouldStrobe = true;
-        } else {
-          if (now - lastStrobeTimeRef.current >= currentSettings.strobeRate * 1000) {
-            shouldStrobe = true;
-            lastStrobeTimeRef.current = now;
+        if (isStrobeTriggered) {
+          // 1. Effect: Feedback Zoom and Smoke Drift (only on strobe trigger to avoid smearing and rapid vanishing)
+          if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
+            if (!driftCanvasRef.current) {
+              driftCanvasRef.current = document.createElement('canvas');
+            }
+            const tempCanvas = driftCanvasRef.current;
+            if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
+              tempCanvas.width = trailCanvas.width;
+              tempCanvas.height = trailCanvas.height;
+            }
+            const tempCtx = tempCanvas.getContext('2d');
+            if (tempCtx) {
+              tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+              tempCtx.drawImage(trailCanvas, 0, 0);
+              trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+              
+              trailCtx.save();
+              // Center for scaling
+              trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
+              trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
+              trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
+              
+              // Apply drift
+              trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
+              trailCtx.restore();
+            }
           }
-        }
 
-        if (shouldStrobe) {
+          // 2. Apply fade (only on strobe trigger to preserve trail persistence across intervals)
+          const fadeRate = currentSettings.echoFadeRate;
+          trailCtx.globalCompositeOperation = 'destination-out';
+          trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
+          trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
+
+          // 3. Stroboscopic rendering: Draw new motion mask snapshot onto the trail canvas
           trailCtx.globalCompositeOperation = 'source-over';
           
           const filters = [];
@@ -1705,6 +1736,26 @@ export default function TrackingCanvas() {
               }
               className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
             />
+
+            {settings.strobeRate > 0 && (
+              <div className="flex items-center justify-between gap-4 mt-2 p-2.5 rounded-lg bg-neutral-950/40 border border-neutral-800/60 transition-all duration-300">
+                <div className="flex flex-col">
+                  <span className="text-[11px] font-medium text-neutral-300">Strobe Style</span>
+                  <span className="text-[9px] text-neutral-500 leading-tight">Choose how frames behave between updates.</span>
+                </div>
+                <select
+                  value={settings.strobeMode}
+                  onChange={(e) => {
+                    const val = e.target.value as 'freeze' | 'flash';
+                    setSettings((prev) => ({ ...prev, strobeMode: val }));
+                  }}
+                  className="bg-neutral-800 text-[11px] text-neutral-200 border border-neutral-700 px-2 py-1.5 rounded-md outline-none cursor-pointer focus:border-blue-500 transition-all"
+                >
+                  <option value="freeze">Freeze Frame (Posterize)</option>
+                  <option value="flash">Blackout Flash (Strobe Light)</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5 mt-2">
