@@ -174,7 +174,6 @@ export default function TrackingCanvas() {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
       }
-      setRecordingSeconds(0);
     }
 
     return () => {
@@ -601,6 +600,7 @@ export default function TrackingCanvas() {
     if (!canvas) return;
 
     setRecordedVideoUrl(null);
+    setRecordingSeconds(0);
     recordedChunksRef.current = [];
 
     // Capture the processed canvas stream at the user's selected frame rate
