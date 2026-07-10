@@ -1,0 +1,10 @@
+{
+  "name": "Juggling Trail Camera",
+  "description": "Real-time juggling object tracker that renders visual trailing effects and trajectory mapping on live camera feeds, with video recording export capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
