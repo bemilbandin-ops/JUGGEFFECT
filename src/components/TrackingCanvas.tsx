@@ -38,6 +38,7 @@ export default function TrackingCanvas() {
   const motionMaskDataRef = useRef<ImageData | null>(null);
   const trailCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -326,24 +327,12 @@ export default function TrackingCanvas() {
       const h = canvas.height;
       const currentSettings = settingsRef.current;
 
-      let sourceCanvas: HTMLCanvasElement | HTMLVideoElement = video;
-
-      if (currentSettings.motionBlur > 0) {
-        blurredVideoCtx.globalAlpha = 1.0 - currentSettings.motionBlur;
-        blurredVideoCtx.drawImage(video, 0, 0, w, h);
-        blurredVideoCtx.globalAlpha = 1.0;
-        sourceCanvas = blurredVideoCanvas;
-      } else {
-        // Keep it seeded so it doesn't blink black if turned on
-        blurredVideoCtx.drawImage(video, 0, 0, w, h);
-      }
-
-      // 2. Draw raw video (or blurred video) frame to display canvas
-      ctx.drawImage(sourceCanvas, 0, 0, w, h);
+      // 2. Draw raw video frame to display canvas
+      ctx.drawImage(video, 0, 0, w, h);
 
       // 3. Process frame for tracking
-      // Draw frame to low-res canvas for high performance
-      procCtx.drawImage(sourceCanvas, 0, 0, procCanvas.width, procCanvas.height);
+      // Draw frame to low-res canvas for high performance (using sharp video)
+      procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
       const procImageData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
 
       if (!bgDataRef.current || bgDataRef.current.length !== procImageData.data.length) {
@@ -362,6 +351,47 @@ export default function TrackingCanvas() {
         currentSettings.bgLearningRate,
         currentSettings.invertColors
       );
+
+      // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
+      procCtx.putImageData(motionMaskDataRef.current, 0, 0);
+
+      // 4. Temporal Motion Blur (Only applied to moving objects)
+      if (currentSettings.motionBlur > 0) {
+        // Accumulate video frames inside the blur canvas
+        blurredVideoCtx.globalAlpha = 1.0 - currentSettings.motionBlur;
+        blurredVideoCtx.drawImage(video, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
+        blurredVideoCtx.globalAlpha = 1.0;
+
+        if (!maskedBlurCanvasRef.current) {
+          maskedBlurCanvasRef.current = document.createElement('canvas');
+        }
+        const maskedBlurCanvas = maskedBlurCanvasRef.current;
+        const maskedBlurCtx = maskedBlurCanvas.getContext('2d');
+
+        if (maskedBlurCanvas.width !== video.videoWidth || maskedBlurCanvas.height !== video.videoHeight) {
+          maskedBlurCanvas.width = video.videoWidth;
+          maskedBlurCanvas.height = video.videoHeight;
+        }
+
+        if (maskedBlurCtx) {
+          // Clear temp canvas
+          maskedBlurCtx.clearRect(0, 0, maskedBlurCanvas.width, maskedBlurCanvas.height);
+          
+          // Draw the low-res motion mask (stretched to full size)
+          maskedBlurCtx.drawImage(procCanvas, 0, 0, maskedBlurCanvas.width, maskedBlurCanvas.height);
+          
+          // Mask the accumulated blurred video frame
+          maskedBlurCtx.globalCompositeOperation = 'source-in';
+          maskedBlurCtx.drawImage(blurredVideoCanvas, 0, 0);
+          maskedBlurCtx.globalCompositeOperation = 'source-over';
+          
+          // Draw only the blurred motion area on top of the sharp video
+          ctx.drawImage(maskedBlurCanvas, 0, 0, w, h);
+        }
+      } else {
+        // Keep it seeded so it doesn't blink black if turned on
+        blurredVideoCtx.drawImage(video, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
+      }
 
       // Effect: Trail processing and rendering
       if (currentSettings.enableTrails) {
@@ -420,7 +450,6 @@ export default function TrackingCanvas() {
           
           trailCtx.filter = filters.length > 0 ? filters.join(' ') : 'none';
           
-          procCtx.putImageData(motionMaskDataRef.current, 0, 0);
           trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
           trailCtx.filter = 'none'; // reset filter
         }
@@ -434,14 +463,8 @@ export default function TrackingCanvas() {
 
       // Draw debug binary mask overlay if enabled
       if (currentSettings.showDebugFeed) {
-        // Render debugMask on a temp canvas and scale it over the display canvas
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = procCanvas.width;
-        tempCanvas.height = procCanvas.height;
-        tempCanvas.getContext('2d')?.putImageData(motionMaskDataRef.current, 0, 0);
-
         ctx.globalAlpha = 0.65;
-        ctx.drawImage(tempCanvas, 0, 0, w, h);
+        ctx.drawImage(procCanvas, 0, 0, w, h);
         ctx.globalAlpha = 1.0;
       }
 
