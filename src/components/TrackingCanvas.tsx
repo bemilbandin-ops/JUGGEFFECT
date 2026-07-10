@@ -40,6 +40,7 @@ export default function TrackingCanvas() {
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const smoothingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -71,6 +72,7 @@ export default function TrackingCanvas() {
     horizontalDrift: 0,
     feedbackZoom: 1.0,
     motionBlur: 0,
+    lineSmoothness: 0,
   });
 
   const settingsRef = useRef(settings);
@@ -385,6 +387,28 @@ export default function TrackingCanvas() {
 
       // Write the motion mask pixels to procCanvas immediately so we can use it for blur overlay and trails
       procCtx.putImageData(motionMaskDataRef.current, 0, 0);
+
+      // Apply Line Smoothness (Anti-aliasing/Blur) to the mask
+      if (currentSettings.lineSmoothness > 0) {
+        if (!smoothingCanvasRef.current) {
+          smoothingCanvasRef.current = document.createElement('canvas');
+        }
+        const smoothCanvas = smoothingCanvasRef.current;
+        if (smoothCanvas.width !== procCanvas.width || smoothCanvas.height !== procCanvas.height) {
+          smoothCanvas.width = procCanvas.width;
+          smoothCanvas.height = procCanvas.height;
+        }
+        const smoothCtx = smoothCanvas.getContext('2d');
+        if (smoothCtx) {
+           smoothCtx.clearRect(0, 0, smoothCanvas.width, smoothCanvas.height);
+           smoothCtx.filter = `blur(${currentSettings.lineSmoothness}px)`;
+           smoothCtx.drawImage(procCanvas, 0, 0);
+           smoothCtx.filter = 'none';
+           
+           procCtx.clearRect(0, 0, procCanvas.width, procCanvas.height);
+           procCtx.drawImage(smoothCanvas, 0, 0);
+        }
+      }
 
       // 4. Temporal Motion Blur (Only applied to moving objects)
       if (currentSettings.motionBlur > 0) {
@@ -1017,6 +1041,27 @@ export default function TrackingCanvas() {
                 value={settings.blurAmount}
                 onChange={(e) =>
                   setSettings((prev) => ({ ...prev, blurAmount: parseInt(e.target.value) }))
+                }
+                className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 mt-2">
+              <div className="flex justify-between text-xs">
+                <div className="flex flex-col">
+                  <span className="text-neutral-400">Line Smoothness</span>
+                  <span className="text-[10px] text-neutral-500">Smooths pixelated edges of the motion trail.</span>
+                </div>
+                <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                value={settings.lineSmoothness}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, lineSmoothness: parseInt(e.target.value) }))
                 }
                 className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
               />

@@ -29,5 +29,6 @@ export interface TrackingSettings {
   horizontalDrift: number;
   feedbackZoom: number;
   motionBlur: number;
+  lineSmoothness: number;
 }
 
