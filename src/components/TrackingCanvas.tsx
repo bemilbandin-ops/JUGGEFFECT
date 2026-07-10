@@ -49,6 +49,7 @@ export default function TrackingCanvas() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [videoSourceMode, setVideoSourceMode] = useState<'camera' | 'file'>('camera');
   const [videoFileUrl, setVideoFileUrl] = useState<string | null>(null);
+  const [isDemoSelected, setIsDemoSelected] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   
@@ -187,6 +188,7 @@ export default function TrackingCanvas() {
     if (e.target.files && e.target.files[0]) {
       const url = URL.createObjectURL(e.target.files[0]);
       setVideoFileUrl(url);
+      setIsDemoSelected(false);
     }
   }
 
@@ -210,9 +212,17 @@ export default function TrackingCanvas() {
         const url = URL.createObjectURL(file);
         setVideoFileUrl(url);
         setVideoSourceMode('file');
+        setIsDemoSelected(false);
         if (cameraActive) stopCamera();
       }
     }
+  }
+
+  function loadDemoVideo() {
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const videoUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}juggling-demo.mp4`;
+    setVideoFileUrl(videoUrl);
+    setIsDemoSelected(true);
   }
 
   // Start Camera Feed or Video File
@@ -815,17 +825,42 @@ export default function TrackingCanvas() {
                   </p>
                 )
               ) : (
-                <div className="w-full flex flex-col gap-2">
-                  <input 
-                    type="file" 
-                    accept="video/*" 
-                    onChange={handleFileSelected} 
-                    className="w-full text-sm text-neutral-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-blue-500/10 file:text-blue-400 hover:file:bg-neutral-700/50"
-                  />
+                <div className="w-full flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Quick Test</span>
+                    <button
+                      onClick={loadDemoVideo}
+                      className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-2 border ${
+                        isDemoSelected 
+                          ? 'bg-blue-500/15 text-blue-400 border-blue-500/40 shadow-sm shadow-blue-500/5' 
+                          : 'bg-neutral-800/60 text-neutral-300 border-neutral-700/50 hover:bg-neutral-800 hover:text-white'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      {isDemoSelected ? 'Demo Video Selected' : 'Load Demo Juggling Video'}
+                    </button>
+                  </div>
+
+                  <div className="relative flex py-1 items-center justify-center">
+                    <div className="flex-grow border-t border-neutral-800/60"></div>
+                    <span className="flex-shrink mx-3 text-[10px] text-neutral-500 font-mono tracking-widest">OR</span>
+                    <div className="flex-grow border-t border-neutral-800/60"></div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
+                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Upload Your Own</span>
+                    <input 
+                      type="file" 
+                      accept="video/*" 
+                      onChange={handleFileSelected} 
+                      className="w-full text-xs text-neutral-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-neutral-800 file:text-neutral-300 hover:file:bg-neutral-700 hover:file:text-white file:cursor-pointer cursor-pointer"
+                    />
+                  </div>
+
                   <button
                     onClick={startCamera}
                     disabled={cameraLoading || !videoFileUrl}
-                    className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50"
+                    className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50 mt-1"
                   >
                     {cameraLoading ? 'Starting Video...' : 'Play Video'}
                   </button>
