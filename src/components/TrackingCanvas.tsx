@@ -305,6 +305,8 @@ export default function TrackingCanvas() {
         return;
       }
 
+      const now = performance.now();
+
       // 1. Match display canvas size to video aspect ratio dynamically
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
@@ -393,7 +395,6 @@ export default function TrackingCanvas() {
         frameCountAbsRef.current++;
         colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
 
-        const now = performance.now();
         let shouldStrobe = false;
         if (currentSettings.strobeRate <= 0) {
           shouldStrobe = true;
