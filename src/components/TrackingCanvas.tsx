@@ -59,6 +59,7 @@ export default function TrackingCanvas() {
     }
     return true;
   });
+  const [activeTunerKey, setActiveTunerKey] = useState<string | null>(null);
   
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>({
@@ -721,6 +722,113 @@ export default function TrackingCanvas() {
     return `${m}:${s}`;
   }
 
+  // Tuner settings configurations for the responsive phone quick-slider overlay
+  const tunerSettings = [
+    {
+      key: 'echoFadeRate',
+      name: 'Trail Length',
+      icon: Waves,
+      min: 0,
+      max: 100,
+      step: 1,
+      getValue: () => Math.round((1 - settings.echoFadeRate) * 100),
+      setValue: (val: number) => setSettings(prev => ({ ...prev, echoFadeRate: 1 - (val / 100) })),
+      format: (val: number) => val === 0 ? '0% (Off)' : val === 100 ? 'Infinite' : `${val}% retention`
+    },
+    {
+      key: 'motionThreshold',
+      name: 'Sensitivity',
+      icon: Activity,
+      min: 15,
+      max: 120,
+      step: 1,
+      getValue: () => 135 - settings.motionThreshold,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, motionThreshold: 135 - val })),
+      format: (val: number) => `${val}%`
+    },
+    {
+      key: 'blurAmount',
+      name: 'Trail Glow',
+      icon: Sparkles,
+      min: 0,
+      max: 20,
+      step: 1,
+      getValue: () => settings.blurAmount,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, blurAmount: val })),
+      format: (val: number) => `${val}px`
+    },
+    {
+      key: 'hueRotate',
+      name: 'Hue Shift',
+      icon: Sliders,
+      min: 0,
+      max: 360,
+      step: 1,
+      getValue: () => settings.hueRotate,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, hueRotate: val })),
+      format: (val: number) => `${val}°`
+    },
+    {
+      key: 'feedbackZoom',
+      name: 'Feedback Zoom',
+      icon: Maximize2,
+      min: 0.95,
+      max: 1.10,
+      step: 0.005,
+      getValue: () => settings.feedbackZoom,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, feedbackZoom: val })),
+      format: (val: number) => val === 1.0 ? '100% (Off)' : `${((val - 1) * 100).toFixed(1)}%`
+    },
+    {
+      key: 'strobeRate',
+      name: 'Strobe Rate',
+      icon: Camera,
+      min: 0,
+      max: 2.0,
+      step: 0.05,
+      getValue: () => settings.strobeRate,
+      setValue: (val: number) => setSettings(prev => ({ ...prev, strobeRate: val })),
+      format: (val: number) => val === 0 ? 'Off' : `Every ${val.toFixed(2)}s`
+    }
+  ];
+
+  // Dynamic visual indicator styling (higher setting = more colorful/glowing, lower/off = grayed out)
+  const getSettingColor = (key: string) => {
+    switch (key) {
+      case 'echoFadeRate': {
+        const p = 1 - settings.echoFadeRate;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-cyan-400 bg-cyan-950/20 border-cyan-800/60 shadow-[0_0_12px_rgba(34,211,238,0.25)]';
+      }
+      case 'motionThreshold': {
+        const val = 135 - settings.motionThreshold;
+        const p = (val - 15) / 105;
+        if (p < 0.1) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-emerald-400 bg-emerald-950/20 border-emerald-805/60 shadow-[0_0_12px_rgba(52,211,153,0.25)]';
+      }
+      case 'blurAmount': {
+        const p = settings.blurAmount / 20;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-purple-400 bg-purple-950/20 border-purple-800/60 shadow-[0_0_12px_rgba(192,132,252,0.25)]';
+      }
+      case 'hueRotate': {
+        if (settings.hueRotate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'bg-neutral-950/40 border-neutral-700/60 shadow-[0_0_12px_rgba(255,255,255,0.15)]';
+      }
+      case 'feedbackZoom': {
+        const p = Math.abs(settings.feedbackZoom - 1.0) / 0.1;
+        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-amber-400 bg-amber-950/20 border-amber-800/60 shadow-[0_0_12px_rgba(251,191,36,0.25)]';
+      }
+      case 'strobeRate': {
+        if (settings.strobeRate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-rose-400 bg-rose-950/20 border-rose-800/60 shadow-[0_0_12px_rgba(251,113,133,0.25)]';
+      }
+      default:
+        return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+    }
+  };
+
   return (
     <div 
       className="w-full h-full relative bg-black"
@@ -1218,6 +1326,74 @@ export default function TrackingCanvas() {
         </button>
       )}
 
+      {/* 3. Pro Mode Mobile Tuner Overlay (only visible when camera is active and sidebar is closed) */}
+      {cameraActive && !isSidebarOpen && (
+        <div className="absolute bottom-28 left-4 right-4 z-20 pointer-events-none flex flex-col items-center gap-3 md:hidden">
+          <AnimatePresence>
+            {activeTunerKey && (() => {
+              const item = tunerSettings.find(s => s.key === activeTunerKey);
+              if (!item) return null;
+              const Icon = item.icon;
+              const value = item.getValue();
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                  transition={{ type: 'spring', damping: 20, stiffness: 180 }}
+                  className="bg-[#0a0a0a]/95 backdrop-blur-xl border border-neutral-800/80 rounded-2xl px-4 py-3.5 w-full max-w-[280px] flex flex-col gap-2.5 shadow-2xl pointer-events-auto font-sans"
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 text-neutral-300">
+                      <Icon className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{item.name}</span>
+                    </div>
+                    <span 
+                      className="font-mono text-[11px]"
+                      style={item.key === 'hueRotate' && settings.hueRotate > 0 ? { color: `hsl(${settings.hueRotate}, 85%, 65%)` } : { color: '#e5e5e5' }}
+                    >
+                      {item.format(value)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={item.min}
+                    max={item.max}
+                    step={item.step}
+                    value={value}
+                    onChange={(e) => item.setValue(parseFloat(e.target.value))}
+                    className="w-full accent-blue-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer mt-1"
+                  />
+                </motion.div>
+              );
+            })()}
+          </AnimatePresence>
+
+          <div className="bg-[#050505]/95 backdrop-blur-md border border-neutral-900 rounded-full px-2.5 py-1.5 flex items-center gap-2 shadow-2xl pointer-events-auto">
+            {tunerSettings.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTunerKey === item.key;
+              const colorClass = getSettingColor(item.key);
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => setActiveTunerKey(isActive ? null : item.key)}
+                  className={`w-10 h-10 rounded-full border transition-all flex items-center justify-center cursor-pointer ${
+                    isActive 
+                      ? 'bg-blue-600 border-blue-500 text-white scale-110 shadow-lg shadow-blue-500/25 z-10' 
+                      : colorClass
+                  }`}
+                  style={item.key === 'hueRotate' && settings.hueRotate > 0 && !isActive ? { color: `hsl(${settings.hueRotate}, 85%, 65%)`, borderColor: `hsla(${settings.hueRotate}, 85%, 65%, 0.3)` } : undefined}
+                  title={item.name}
+                >
+                  <Icon className="w-4 h-4" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 2. Control Panel Sidebar */}
       <AnimatePresence>
         {isSidebarOpen && (
@@ -1280,7 +1456,10 @@ export default function TrackingCanvas() {
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Mask Sensitivity</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Mask Sensitivity
+                  </span>
                   <span className="text-[10px] text-neutral-500">Controls how much motion is picked up by the camera.</span>
                 </div>
                 <span className="text-neutral-200 font-mono shrink-0 text-right">{100 - settings.motionThreshold}%</span>
@@ -1321,7 +1500,10 @@ export default function TrackingCanvas() {
             <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableLightTracking ? 'hidden' : ''}`}>
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Brightness Threshold</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Eye className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Brightness Threshold
+                  </span>
                   <span className="text-[10px] text-neutral-500">Minimum brightness to track.</span>
                 </div>
                 <span className="text-neutral-200 font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
@@ -1342,7 +1524,10 @@ export default function TrackingCanvas() {
             <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Echo Trail Length</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Waves className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Echo Trail Length
+                  </span>
                   <span className="text-[10px] text-neutral-500">How long the trail persists before fading away.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">
@@ -1370,7 +1555,10 @@ export default function TrackingCanvas() {
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Trail Blur Amount</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Trail Blur Amount
+                  </span>
                   <span className="text-[10px] text-neutral-500">Applies a soft glow-like blur to the trails.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.blurAmount}px</span>
@@ -1391,7 +1579,10 @@ export default function TrackingCanvas() {
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Smear Edges</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Smear Edges
+                  </span>
                   <span className="text-[10px] text-neutral-500">Applies a spatial blur (creates a glowing cloud if set too high).</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
@@ -1433,7 +1624,10 @@ export default function TrackingCanvas() {
             <div className="flex flex-col gap-1.5 mt-2">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Color Hue Shift</span>
+                  <span className="text-neutral-400 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-neutral-400/80" />
+                    Color Hue Shift
+                  </span>
                   <span className="text-[10px] text-neutral-500">Shifts the colors of the trail permanently.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.hueRotate}°</span>
@@ -1490,7 +1684,10 @@ export default function TrackingCanvas() {
           <div className="flex flex-col gap-1.5 mt-1">
             <div className="flex justify-between text-xs">
               <div className="flex flex-col">
-                <span className="text-neutral-400">Chronophotography (Strobe)</span>
+                <span className="text-neutral-400 flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-neutral-400/80" />
+                  Chronophotography (Strobe)
+                </span>
                 <span className="text-[10px] text-neutral-500">Captures distinct snapshot frames instead of a continuous trail.</span>
               </div>
               <span className="text-neutral-200 font-mono shrink-0 text-right">
@@ -1578,7 +1775,10 @@ export default function TrackingCanvas() {
           <div className="flex flex-col gap-1.5 mt-2 mb-2">
             <div className="flex justify-between text-xs">
               <div className="flex flex-col">
-                <span className="text-neutral-400">Feedback Loop (Zoom)</span>
+                <span className="text-neutral-400 flex items-center gap-1.5">
+                  <Maximize2 className="w-3.5 h-3.5 text-neutral-400/80" />
+                  Feedback Loop (Zoom)
+                </span>
                 <span className="text-[10px] text-neutral-500">Scales the trail up/down for an infinite zoom.</span>
               </div>
               <span className="text-neutral-200 font-mono shrink-0 text-right">
