@@ -17,11 +17,151 @@ import {
   Activity,
   Award,
   Waves,
-  X
+  X,
+  Key,
+  AlertCircle,
+  Zap,
+  Wind,
+  ChevronDown,
+  ChevronUp,
+  Infinity,
+  Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
+import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
+
+const QUICK_PRESETS = [
+  {
+    id: 'led',
+    name: 'LED Tracker',
+    description: 'Filters dark details to track glowing props in low light.',
+    icon: 'Zap',
+    color: 'text-amber-400 border-amber-500/20 hover:border-amber-500/40 bg-amber-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 40,
+      enableLightTracking: true,
+      lightThreshold: 200,
+      echoFadeRate: 0.08,
+      bgLearningRate: 0.05,
+      blurAmount: 4,
+      hueRotate: 0,
+      colorCycleSpeed: 0,
+      feedbackZoom: 1.0,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Neon Cyberpunk',
+    description: 'Vibrant rainbow trails with a zoom-tunnel echo.',
+    icon: 'Sparkles',
+    color: 'text-pink-400 border-pink-500/20 hover:border-pink-500/40 bg-pink-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 50,
+      enableLightTracking: false,
+      echoFadeRate: 0.05,
+      blurAmount: 8,
+      hueRotate: 180,
+      colorCycleSpeed: 1.5,
+      feedbackZoom: 1.03,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'smoke',
+    name: 'Spectral Smoke',
+    description: 'Ethereal trails that drift upwards like smoke.',
+    icon: 'Wind',
+    color: 'text-teal-400 border-teal-500/20 hover:border-teal-500/40 bg-teal-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 60,
+      enableLightTracking: false,
+      echoFadeRate: 0.03,
+      blurAmount: 6,
+      hueRotate: 0,
+      colorCycleSpeed: 0.3,
+      feedbackZoom: 1.0,
+      verticalDrift: -1.5,
+      horizontalDrift: 0.5,
+      strobeRate: 0,
+      motionBlur: 0.1,
+    }
+  },
+  {
+    id: 'strobe',
+    name: 'Strobe Echo',
+    description: 'Fading frozen silhouettes floating in space.',
+    icon: 'Activity',
+    color: 'text-cyan-400 border-cyan-500/20 hover:border-cyan-500/40 bg-cyan-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 55,
+      enableLightTracking: false,
+      echoFadeRate: 0.12,
+      blurAmount: 4,
+      feedbackZoom: 1.0,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0.15,
+      strobeMode: 'freeze',
+      hueRotate: 120,
+      colorCycleSpeed: 0,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'vortex',
+    name: 'Wormhole Vortex',
+    description: 'Trails get sucked into an infinite inward spiral.',
+    icon: 'Infinity',
+    color: 'text-indigo-400 border-indigo-500/20 hover:border-indigo-500/40 bg-indigo-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 45,
+      enableLightTracking: false,
+      echoFadeRate: 0.02,
+      blurAmount: 2,
+      feedbackZoom: 0.96,
+      verticalDrift: 0,
+      horizontalDrift: 0,
+      strobeRate: 0,
+      colorCycleSpeed: 0.8,
+      motionBlur: 0,
+    }
+  },
+  {
+    id: 'cascade',
+    name: 'Stardust Cascade',
+    description: 'Glowing violet clouds falling down like meteors.',
+    icon: 'Moon',
+    color: 'text-purple-400 border-purple-500/20 hover:border-purple-500/40 bg-purple-950/10',
+    settings: {
+      enableTrails: true,
+      motionThreshold: 55,
+      enableLightTracking: false,
+      echoFadeRate: 0.10,
+      blurAmount: 12,
+      hueRotate: 240,
+      colorCycleSpeed: 0,
+      feedbackZoom: 1.0,
+      verticalDrift: 2.0,
+      horizontalDrift: -1.5,
+      strobeRate: 0,
+      motionBlur: 0.75,
+    }
+  }
+];
 
 export default function TrackingCanvas() {
   // Elements
@@ -94,6 +234,151 @@ export default function TrackingCanvas() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  // Gemini State
+  const [apiKeyInput, setApiKeyInput] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
+  const [geminiActive, setGeminiActive] = useState<boolean>(() => !!getGeminiClient());
+  const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState<boolean>(false);
+  const [geminiAnalysisResult, setGeminiAnalysisResult] = useState<GeminiResponse | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [appliedOption, setAppliedOption] = useState<'A' | 'B' | null>(null);
+  const [originalSettings, setOriginalSettings] = useState<TrackingSettings | null>(null);
+  const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
+  const [geminiCollapsed, setGeminiCollapsed] = useState<boolean>(true);
+
+  const hasEnvApiKey = !!(import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY);
+
+  const handleSaveApiKey = (key: string) => {
+    const trimmed = key.trim();
+    localStorage.setItem('gemini_api_key', trimmed);
+    setApiKeyInput(trimmed);
+    setGeminiActive(!!trimmed);
+    if (!trimmed) {
+      localStorage.removeItem('gemini_api_key');
+    }
+  };
+
+  const captureFrame = (): string | null => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return null;
+
+    // Standardize and downscale resolution for AI analysis (max 640px on the longest side)
+    // This dramatically reduces upload times and inference latency for high-res cameras/videos.
+    const maxDimension = 640;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+
+    if (width > maxDimension || height > maxDimension) {
+      if (width > height) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.80);
+  };
+
+  const runGeminiAnalysis = async () => {
+    setIsGeminiAnalyzing(true);
+    setGeminiError(null);
+    setGeminiAnalysisResult(null);
+    setAppliedOption(null);
+    setOriginalSettings(null);
+
+    try {
+      const dataUrl = captureFrame();
+      if (!dataUrl) {
+        throw new Error('Please start the camera or a video file first to capture a frame.');
+      }
+      console.log('Captured image payload size:', Math.round(dataUrl.length / 1024), 'KB');
+
+      const client = getGeminiClient(apiKeyInput);
+      if (!client) {
+        throw new Error('Please configure a Gemini API key first.');
+      }
+
+      const result = await analyzeScene(dataUrl, apiKeyInput);
+      setGeminiAnalysisResult(result);
+    } catch (err: any) {
+      console.error('Gemini Scene Analysis Error:', err);
+      setGeminiError(err.message || 'An unknown error occurred during analysis.');
+    } finally {
+      setIsGeminiAnalyzing(false);
+    }
+  };
+
+  const applyRecommendedSettings = (recSettings: Partial<TrackingSettings>, option: 'A' | 'B') => {
+    setSettings((prev) => {
+      let base = originalSettings;
+      if (!base) {
+        base = prev;
+        setOriginalSettings(prev);
+      }
+      return {
+        ...base,
+        ...recSettings,
+      };
+    });
+    setAppliedOption(option);
+    setAppliedPresetId(null); // Clear preset selection if AI is used
+  };
+
+  const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
+    setSettings((prev) => {
+      let base = originalSettings;
+      if (!base) {
+        base = prev;
+        setOriginalSettings(prev);
+      }
+      return {
+        ...base,
+        ...presetSettings,
+      };
+    });
+    setAppliedPresetId(presetId);
+    setAppliedOption(null); // Clear Gemini option applied state
+  };
+
+  const resetToOriginalSettings = () => {
+    if (originalSettings) {
+      setSettings(originalSettings);
+      setOriginalSettings(null);
+      setAppliedOption(null);
+      setAppliedPresetId(null);
+    }
+  };
+
+  const getSettingDisplayName = (key: string, val: any): string => {
+    switch (key) {
+      case 'enableTrails': return val ? 'Trails: On' : 'Trails: Off';
+      case 'motionThreshold': return `Sensitivity: ${Math.round((135 - val))}%`;
+      case 'enableLightTracking': return val ? 'Light Filter: On' : 'Light Filter: Off';
+      case 'lightThreshold': return `Min Brightness: ${val}`;
+      case 'echoFadeRate': return `Trail Length: ${Math.round((1 - val) * 100)}%`;
+      case 'bgLearningRate': return `Adaptation Speed: ${Math.round(val * 100)}%`;
+      case 'blurAmount': return `Glow: ${val}px`;
+      case 'hueRotate': return `Hue Shift: ${val}°`;
+      case 'colorCycleSpeed': return val === 0 ? '' : `Color Cycle Speed: ${val}`;
+      case 'strobeRate': return val === 0 ? 'Strobe: Off' : `Strobe: ${val}s`;
+      case 'strobeMode': return `Strobe Style: ${val}`;
+      case 'feedbackZoom': return val === 1.0 ? 'Tunnel Zoom: Off' : `Tunnel Zoom: ${Math.round(val * 100)}%`;
+      case 'verticalDrift': return val === 0 ? '' : `Vertical Drift: ${val}px`;
+      case 'horizontalDrift': return val === 0 ? '' : `Horizontal Drift: ${val}px`;
+      case 'motionBlur': return val === 0 ? 'Motion Blur: Off' : `Motion Blur: ${Math.round(val * 100)}%`;
+      case 'lineSmoothness': return val === 0 ? 'Smoothing: Off' : `Smoothing: ${val}px`;
+      default: return `${key}: ${val}`;
+    }
+  };
 
   // Recording states
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -1453,6 +1738,290 @@ export default function TrackingCanvas() {
             </div>
 
             <div className="flex-1 overflow-y-auto flex flex-col gap-5 p-4 pt-1">
+              {/* Quick Presets Section */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-blue-400" />
+                    <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      Quick Visual Presets
+                    </h3>
+                  </div>
+                  {originalSettings && (
+                    <button
+                      onClick={resetToOriginalSettings}
+                      className="text-[10px] text-red-400 hover:text-red-300 transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Reset to Manual
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  {QUICK_PRESETS.map((preset) => {
+                    const isApplied = appliedPresetId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => applyPreset(preset.id, preset.settings)}
+                        className={`flex flex-col text-left p-3 rounded border text-xs transition-all relative overflow-hidden group cursor-pointer active:scale-97 select-none ${
+                          isApplied
+                            ? 'bg-neutral-800/80 border-blue-500 shadow-md shadow-blue-500/5'
+                            : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700/80 hover:bg-neutral-800/30'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1 mb-1">
+                          <span className={`font-semibold transition-colors ${isApplied ? 'text-blue-400' : 'text-neutral-200 group-hover:text-white'}`}>
+                            {preset.name}
+                          </span>
+                          {preset.id === 'led' && <Zap className={`w-3.5 h-3.5 ${isApplied ? 'text-amber-400' : 'text-amber-500/50 group-hover:text-amber-400'}`} />}
+                          {preset.id === 'cyberpunk' && <Sparkles className={`w-3.5 h-3.5 ${isApplied ? 'text-pink-400' : 'text-pink-500/50 group-hover:text-pink-400'}`} />}
+                          {preset.id === 'smoke' && <Wind className={`w-3.5 h-3.5 ${isApplied ? 'text-teal-400' : 'text-teal-500/50 group-hover:text-teal-400'}`} />}
+                          {preset.id === 'strobe' && <Activity className={`w-3.5 h-3.5 ${isApplied ? 'text-cyan-400' : 'text-cyan-500/50 group-hover:text-cyan-400'}`} />}
+                          {preset.id === 'vortex' && <Infinity className={`w-3.5 h-3.5 ${isApplied ? 'text-indigo-400' : 'text-indigo-500/50 group-hover:text-indigo-400'}`} />}
+                          {preset.id === 'cascade' && <Moon className={`w-3.5 h-3.5 ${isApplied ? 'text-purple-400' : 'text-purple-500/50 group-hover:text-purple-400'}`} />}
+                        </div>
+                        <p className="text-[10px] text-neutral-400 leading-normal mb-2 shrink-0">
+                          {preset.description}
+                        </p>
+                        
+                        <div className="flex flex-wrap gap-1 mt-auto">
+                          {Object.entries(preset.settings)
+                            .map(([k, v]) => getSettingDisplayName(k, v))
+                            .filter(Boolean)
+                            .slice(0, 3) // show top 3 settings to keep it clean
+                            .map((disp, i) => (
+                              <span key={i} className="text-[8px] bg-neutral-950 text-neutral-500 px-1.5 py-0.5 rounded font-mono border border-neutral-950">
+                                {disp}
+                              </span>
+                            ))}
+                          {Object.keys(preset.settings).length > 3 && (
+                            <span className="text-[8px] bg-neutral-950 text-neutral-600 px-1 rounded font-mono border border-neutral-950">
+                              +{Object.keys(preset.settings).length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Gemini AI Auto-Tuner (Beta) Collapsible Section */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded overflow-hidden">
+                <button
+                  onClick={() => setGeminiCollapsed(!geminiCollapsed)}
+                  className="w-full flex items-center justify-between p-3.5 font-sans font-semibold text-xs text-neutral-300 hover:text-white transition-all bg-neutral-900/50 hover:bg-neutral-800/20 cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-400" />
+                    <span>AI Scene Auto-Tuner</span>
+                    <span className="text-[8px] font-mono bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 uppercase tracking-wider scale-90">
+                      Beta
+                    </span>
+                  </div>
+                  {geminiCollapsed ? <ChevronDown className="w-4 h-4 text-neutral-500" /> : <ChevronUp className="w-4 h-4 text-neutral-500" />}
+                </button>
+
+                {!geminiCollapsed && (
+                  <div className="p-4 pt-1 border-t border-neutral-800/60 flex flex-col gap-4 animate-slideDown">
+                    {!geminiActive && !hasEnvApiKey ? (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-xs text-neutral-400 leading-relaxed">
+                          Configure your Gemini API key to auto-tune sensitivity, light-tracking, and artistic settings using frame analysis.
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[9px] text-neutral-500 font-mono uppercase tracking-wider">
+                            Gemini API Key
+                          </label>
+                          <input
+                            type="password"
+                            placeholder="AIzaSy..."
+                            value={apiKeyInput}
+                            onChange={(e) => setApiKeyInput(e.target.value)}
+                            className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-500 transition-all font-mono"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSaveApiKey(apiKeyInput)}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs py-2 px-3 rounded transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <Key className="w-3.5 h-3.5" />
+                          Save API Key
+                        </button>
+                        <a
+                          href="https://aistudio.google.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-blue-400 hover:underline text-center mt-1"
+                        >
+                          Get a free API Key from Google AI Studio &rarr;
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between bg-neutral-950/40 p-2 border border-neutral-800 rounded text-[10px]">
+                          <span className="text-neutral-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            {hasEnvApiKey && !apiKeyInput ? 'Env API Key Active' : 'Custom API Key Active'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              handleSaveApiKey('');
+                            }}
+                            className="text-neutral-500 hover:text-neutral-300 underline cursor-pointer"
+                          >
+                            Reset Key
+                          </button>
+                        </div>
+
+                        {!cameraActive ? (
+                          <div className="text-xs text-neutral-400 text-center py-4 bg-neutral-950/20 border border-dashed border-neutral-800 rounded">
+                            Start camera or load a video file to run analysis.
+                          </div>
+                        ) : (
+                          <button
+                            onClick={runGeminiAnalysis}
+                            disabled={isGeminiAnalyzing}
+                            className={`w-full font-medium text-xs py-2 px-3 rounded transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 ${
+                              isGeminiAnalyzing
+                                ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
+                            }`}
+                          >
+                            {isGeminiAnalyzing ? (
+                              <>
+                                <span className="w-3 h-3 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
+                                Analyzing Scene...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5" />
+                                Analyze Scene
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {geminiError && (
+                          <div className="p-3 bg-red-950/20 border border-red-900/50 rounded flex items-start gap-2 text-xs text-red-400">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <div className="flex-1 leading-relaxed">
+                              <span className="font-semibold block mb-0.5">Analysis failed</span>
+                              {geminiError}
+                            </div>
+                          </div>
+                        )}
+
+                        {geminiAnalysisResult && (
+                          <div className="flex flex-col gap-3 bg-neutral-950/40 border border-neutral-800 rounded p-3 animate-fadeIn">
+                            <div>
+                              <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider block mb-1">
+                                AI Analysis
+                              </span>
+                              <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+                                {geminiAnalysisResult.analysis}
+                              </p>
+                            </div>
+
+                            <div className="h-px bg-neutral-800" />
+
+                            {/* Option A */}
+                            <div className="flex flex-col gap-2 border border-neutral-800 rounded p-2.5 bg-neutral-900/50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-blue-400">
+                                  Option A: {geminiAnalysisResult.optionA.name}
+                                </span>
+                                <span className="text-[9px] font-mono bg-blue-950/30 text-blue-300 border border-blue-800/40 px-1 rounded uppercase">
+                                  Tracking
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                {geminiAnalysisResult.optionA.description}
+                              </p>
+                              <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
+                                {Object.entries(geminiAnalysisResult.optionA.settings)
+                                  .map(([k, v]) => getSettingDisplayName(k, v))
+                                  .filter(Boolean)
+                                  .map((disp, i) => (
+                                    <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                      {disp}
+                                    </span>
+                                  ))}
+                              </div>
+                              <button
+                                onClick={() =>
+                                  applyRecommendedSettings(geminiAnalysisResult.optionA.settings, 'A')
+                                }
+                                className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                  appliedOption === 'A'
+                                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                                    : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                }`}
+                              >
+                                {appliedOption === 'A' ? (
+                                  <>
+                                    <Check className="w-3 h-3" />
+                                    Option A Applied
+                                  </>
+                                ) : (
+                                  'Apply Option A Settings'
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Option B */}
+                            <div className="flex flex-col gap-2 border border-neutral-800 rounded p-2.5 bg-neutral-900/50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-purple-400">
+                                  Option B: {geminiAnalysisResult.optionB.name}
+                                </span>
+                                <span className="text-[9px] font-mono bg-purple-950/30 text-purple-300 border border-purple-800/40 px-1 rounded uppercase">
+                                  Artistic
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                {geminiAnalysisResult.optionB.description}
+                              </p>
+                              <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
+                                {Object.entries(geminiAnalysisResult.optionB.settings)
+                                  .map(([k, v]) => getSettingDisplayName(k, v))
+                                  .filter(Boolean)
+                                  .map((disp, i) => (
+                                    <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                      {disp}
+                                    </span>
+                                  ))}
+                              </div>
+                              <button
+                                onClick={() =>
+                                  applyRecommendedSettings(geminiAnalysisResult.optionB.settings, 'B')
+                                }
+                                className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                  appliedOption === 'B'
+                                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
+                                    : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                }`}
+                              >
+                                {appliedOption === 'B' ? (
+                                  <>
+                                    <Check className="w-3 h-3" />
+                                    Option B Applied
+                                  </>
+                                ) : (
+                                  'Apply Option B Settings'
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
             <Activity className="w-4 h-4 text-blue-400" />
