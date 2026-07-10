@@ -1080,7 +1080,7 @@ export default function TrackingCanvas() {
               <input
                 type="range"
                 min="0"
-                max="150"
+                max="500"
                 step="5"
                 value={settings.edgeAntiAliasing}
                 onChange={(e) =>
