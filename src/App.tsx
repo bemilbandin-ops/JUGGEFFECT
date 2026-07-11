@@ -1,5 +1,6 @@
 // Vercel deployment trigger
 import { Camera, Settings2 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import TrackingCanvas from './components/TrackingCanvas';
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
       <main className="flex-1 w-full h-full relative">
         <TrackingCanvas />
       </main>
+      <Analytics />
     </div>
   );
 }
