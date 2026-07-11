@@ -35,5 +35,35 @@ export interface TrackingSettings {
   exportQuality: 'standard' | 'medium' | 'high' | 'ultra';
   exportFps: 30 | 60;
   exportMimeType: string;
+  exposure: number;
+  contrast: number;
+  saturation: number;
+  temperature: number;
+  tint: number;
+  cloneStampEnabled: boolean;
+  cloneStampOffsetX: number;
+  cloneStampOffsetY: number;
+  cloneStampBrushSize: number;
+  cloneStampFeather: number;
+  enablePoiMode: boolean;
+  poiPatternType: 'swedish' | 'youtube' | 'rainbow' | 'flowers' | 'text' | 'custom';
+  poiText: string;
+  poiTextColor: string;
+  poiCustomImage: string | null;
+  poiHeight: number;
+  poiWidth: number;
+  poiOrientation: 'vertical' | 'horizontal' | 'motion' | 'radial' | 'club';
+  poiCenterRelativeX: number;
+  poiCenterRelativeY: number;
+  poiSpeedMultiplier: number;
+  poiMaxPoints: number;
+  poiMappingMode: 'time' | 'angle' | 'spatial';
+  poiRenderMode: 'solid' | 'dots';
+  poiOpacity: number;
+  poiFadeInTime: number;
+  poiHoldTime: number;
+  poiFadeOutTime: number;
+  poiWaitTime: number;
+  poiFrameInterval: number;
 }
 
