@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
+import { DEFAULT_TRACKING_SETTINGS, QUICK_PRESETS } from '../config/settingsDefaults';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
 import {
@@ -48,182 +49,6 @@ import {
   PovTrailEntry,
   PovSample,
 } from '../utils/pov';
-
-const QUICK_PRESETS: {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  color: string;
-  settings: Partial<TrackingSettings>;
-}[] = [
-  {
-    id: 'led',
-    name: 'LED Tracker',
-    description: 'Filters dark details to track glowing props in low light.',
-    icon: 'Zap',
-    color: 'text-amber-400 border-amber-500/20 hover:border-amber-500/40 bg-amber-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 40,
-      enableLightTracking: true,
-      lightThreshold: 200,
-      echoFadeRate: 0.08,
-      bgLearningRate: 0.05,
-      blurAmount: 4,
-      hueRotate: 0,
-      colorCycleSpeed: 0,
-      feedbackZoom: 1.0,
-      verticalDrift: 0,
-      horizontalDrift: 0,
-      strobeRate: 0,
-      motionBlur: 0,
-    }
-  },
-  {
-    id: 'cyberpunk',
-    name: 'Neon Cyberpunk',
-    description: 'Vibrant rainbow trails with a zoom-tunnel echo.',
-    icon: 'Sparkles',
-    color: 'text-pink-400 border-pink-500/20 hover:border-pink-500/40 bg-pink-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 50,
-      enableLightTracking: false,
-      echoFadeRate: 0.05,
-      blurAmount: 8,
-      hueRotate: 180,
-      colorCycleSpeed: 1.5,
-      feedbackZoom: 1.03,
-      verticalDrift: 0,
-      horizontalDrift: 0,
-      strobeRate: 0,
-      motionBlur: 0,
-    }
-  },
-  {
-    id: 'smoke',
-    name: 'Spectral Smoke',
-    description: 'Ethereal trails that drift upwards like smoke.',
-    icon: 'Wind',
-    color: 'text-teal-400 border-teal-500/20 hover:border-teal-500/40 bg-teal-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 60,
-      enableLightTracking: false,
-      echoFadeRate: 0.03,
-      blurAmount: 6,
-      hueRotate: 0,
-      colorCycleSpeed: 0.3,
-      feedbackZoom: 1.0,
-      verticalDrift: -1.5,
-      horizontalDrift: 0.5,
-      strobeRate: 0,
-      motionBlur: 0.1,
-    }
-  },
-  {
-    id: 'strobe',
-    name: 'Strobe Echo',
-    description: 'Fading frozen silhouettes floating in space.',
-    icon: 'Activity',
-    color: 'text-cyan-400 border-cyan-500/20 hover:border-cyan-500/40 bg-cyan-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 55,
-      enableLightTracking: false,
-      echoFadeRate: 0.12,
-      blurAmount: 4,
-      feedbackZoom: 1.0,
-      verticalDrift: 0,
-      horizontalDrift: 0,
-      strobeRate: 0.15,
-      strobeMode: 'freeze',
-      hueRotate: 120,
-      colorCycleSpeed: 0,
-      motionBlur: 0,
-    }
-  },
-  {
-    id: 'vortex',
-    name: 'Wormhole Vortex',
-    description: 'Trails get sucked into an infinite inward spiral.',
-    icon: 'Infinity',
-    color: 'text-indigo-400 border-indigo-500/20 hover:border-indigo-500/40 bg-indigo-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 45,
-      enableLightTracking: false,
-      echoFadeRate: 0.02,
-      blurAmount: 2,
-      feedbackZoom: 0.96,
-      verticalDrift: 0,
-      horizontalDrift: 0,
-      strobeRate: 0,
-      colorCycleSpeed: 0.8,
-      motionBlur: 0,
-    }
-  },
-  {
-    id: 'cascade',
-    name: 'Stardust Cascade',
-    description: 'Glowing violet clouds falling down like meteors.',
-    icon: 'Moon',
-    color: 'text-purple-400 border-purple-500/20 hover:border-purple-500/40 bg-purple-950/10',
-    settings: {
-      enableTrails: true,
-      motionThreshold: 55,
-      enableLightTracking: false,
-      echoFadeRate: 0.10,
-      blurAmount: 12,
-      hueRotate: 240,
-      colorCycleSpeed: 0,
-      feedbackZoom: 1.0,
-      verticalDrift: 2.0,
-      horizontalDrift: -1.5,
-      strobeRate: 0,
-      motionBlur: 0.75,
-    }
-  },
-  {
-    id: 'pixel-poi',
-    name: 'Pixel POV',
-    description: 'Persistence-of-vision sweep that paints images along club trails.',
-    icon: 'Flame',
-    color: 'text-blue-400 border-blue-500/20 hover:border-blue-500/40 bg-blue-950/10',
-    settings: {
-      enableTrails: true,
-      enablePoiMode: true,
-      poiPatternType: 'spiral',
-      poiOrientation: 'club',
-      enableLightTracking: true,
-      lightThreshold: 200,
-      echoFadeRate: 0.02,
-      blurAmount: 0,
-      poiHeight: 0,
-      poiWidth: 3,
-      poiSpeedMultiplier: 2.5,
-      poiMaxPoints: 3,
-      poiMappingMode: 'time',
-      poiRenderMode: 'dots',
-      poiOpacity: 1.0,
-      poiFadeInTime: 0,
-      poiHoldTime: 0,
-      poiFadeOutTime: 0,
-      poiWaitTime: 0,
-      poiFrameInterval: 1,
-      poiPovEnabled: true,
-      poiPovRetention: 400,
-      poiPovFadeMode: 'exponential',
-      poiPovColumnSpacing: 3,
-      poiPovMotionMode: 'free',
-      poiGlowEnabled: true,
-      poiGlowRadius: 6,
-      poiGlowIntensity: 0.5,
-      poiLedCount: 0,
-    }
-  }
-];
 
 interface BlobPoint {
   x: number;
@@ -615,71 +440,29 @@ export default function TrackingCanvas() {
   const [activeTunerKey, setActiveTunerKey] = useState<string | null>(null);
   
   // Settings state
-  const [settings, setSettings] = useState<TrackingSettings>({
-    enableTrails: true,
-    motionThreshold: 50,
-    enableLightTracking: true,
-    lightThreshold: 200,
-    echoFadeRate: 0.05,
-    bgLearningRate: 0.05,
-    blurAmount: 0,
-    hueRotate: 0,
-    compositeMode: 'screen',
-    invertColors: false,
-    showDebugFeed: false,
-    enableAudioSync: false,
-    strobeRate: 0,
-    strobeMode: 'freeze',
-    colorCycleSpeed: 0,
-    verticalDrift: 0,
-    horizontalDrift: 0,
-    feedbackZoom: 1.0,
-    motionBlur: 0,
-    lineSmoothness: 0,
-    edgeAntiAliasing: 30,
-    exportQuality: 'high',
-    exportFps: 30,
-    exportMimeType: '',
-    exposure: 0,
-    contrast: 0,
-    saturation: 0,
-    temperature: 0,
-    tint: 0,
-    cloneStampEnabled: false,
-    cloneStampOffsetX: 50,
-    cloneStampOffsetY: 0,
-    cloneStampBrushSize: 30,
-    cloneStampFeather: 15,
-    enablePoiMode: false,
-    poiPatternType: 'swedish',
-    poiText: 'JUGGLE',
-    poiTextColor: '#ff2a85',
-    poiCustomImage: null,
-    poiHeight: 0, // 0 means auto-detect from club length
-    poiWidth: 3,
-    poiOrientation: 'club',
-    poiCenterRelativeX: 0.5,
-    poiCenterRelativeY: 0.5,
-    poiSpeedMultiplier: 2.0,
-    poiMaxPoints: 3,
-    poiMappingMode: 'angle',
-    poiRenderMode: 'dots',
-    poiOpacity: 1.0,
-    poiFadeInTime: 0,
-    poiHoldTime: 0,
-    poiFadeOutTime: 0,
-    poiWaitTime: 0,
-    poiFrameInterval: 1,
-    poiPovEnabled: true,
-    poiPovRetention: 400,
-    poiPovFadeMode: 'exponential',
-    poiPovColumnSpacing: 3,
-    poiPovMotionMode: 'free',
-    poiGlowEnabled: true,
-    poiGlowRadius: 6,
-    poiGlowIntensity: 0.5,
-    poiLedCount: 0,
+  const [settings, setSettings] = useState<TrackingSettings>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('juggeffect_tracking_settings');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // Merge with DEFAULT_TRACKING_SETTINGS to ensure any newly added setting fields exist
+          return { ...DEFAULT_TRACKING_SETTINGS, ...parsed };
+        } catch (e) {
+          console.error('Failed to parse saved settings:', e);
+        }
+      }
+    }
+    return DEFAULT_TRACKING_SETTINGS;
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('juggeffect_tracking_settings', JSON.stringify(settings));
+    } catch (e) {
+      console.error('Failed to save settings to localStorage:', e);
+    }
+  }, [settings]);
 
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -828,6 +611,20 @@ export default function TrackingCanvas() {
       setOriginalSettings(null);
       setAppliedOption(null);
       setAppliedPresetId(null);
+    }
+  };
+
+  const resetToFactoryDefaults = () => {
+    if (window.confirm('Are you sure you want to reset all settings to defaults? This will clear your custom tweaks.')) {
+      setSettings(DEFAULT_TRACKING_SETTINGS);
+      setOriginalSettings(null);
+      setAppliedOption(null);
+      setAppliedPresetId(null);
+      try {
+        localStorage.removeItem('juggeffect_tracking_settings');
+      } catch (e) {
+        console.error('Failed to clear settings from localStorage:', e);
+      }
     }
   };
 
@@ -3368,15 +3165,25 @@ export default function TrackingCanvas() {
                           Quick Visual Presets
                         </h3>
                       </div>
-                      {originalSettings && (
+                      <div className="flex items-center gap-3 select-none">
+                        {originalSettings && (
+                          <button
+                            onClick={resetToOriginalSettings}
+                            className="text-[10px] text-amber-400 hover:text-amber-300 transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Reset to Manual
+                          </button>
+                        )}
                         <button
-                          onClick={resetToOriginalSettings}
+                          onClick={resetToFactoryDefaults}
                           className="text-[10px] text-red-400 hover:text-red-300 transition-all flex items-center gap-1 cursor-pointer"
+                          title="Reset all settings to default values and clear local storage"
                         >
                           <Trash2 className="w-3 h-3" />
-                          Reset to Manual
+                          Reset to Defaults
                         </button>
-                      )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2.5">
