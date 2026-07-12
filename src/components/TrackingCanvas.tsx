@@ -2,6 +2,8 @@ import React, { useRef, useEffect, useState, MouseEvent } from 'react';
 import {
   Camera,
   Play,
+  Pause,
+  RotateCcw,
   Square,
   Download,
   Maximize2,
@@ -603,6 +605,10 @@ export default function TrackingCanvas() {
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraLoading, setCameraLoading] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const isScrubbingRef = useRef<boolean>(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [videoSourceMode, setVideoSourceMode] = useState<'camera' | 'file'>('camera');
@@ -1056,6 +1062,75 @@ export default function TrackingCanvas() {
     setIsDemoSelected(true);
   }
 
+  const handleDurationChange = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    setDuration(e.currentTarget.duration || 0);
+  };
+
+  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!isScrubbingRef.current) {
+      setCurrentTime(e.currentTarget.currentTime || 0);
+    }
+  };
+
+  const handlePlay = () => {
+    setIsPaused(false);
+  };
+
+  const handlePause = () => {
+    setIsPaused(true);
+  };
+
+  const handleSeeked = () => {
+    bgDataRef.current = null;
+    motionMaskDataRef.current = null;
+    if (trailCanvasRef.current) {
+      const tCtx = trailCanvasRef.current.getContext('2d');
+      if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
+    }
+    trackedPointsRef.current = [];
+  };
+
+  const handleScrubChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTime = parseFloat(e.target.value);
+    setCurrentTime(newTime);
+    if (videoRef.current) {
+      videoRef.current.currentTime = newTime;
+    }
+  };
+
+  const handleScrubStart = () => {
+    isScrubbingRef.current = true;
+  };
+
+  const handleScrubEnd = () => {
+    isScrubbingRef.current = false;
+  };
+
+  const handleTogglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play().catch(err => {
+        if (err.name === 'AbortError' || err.message?.includes('interrupted')) {
+          console.log('Playback interrupted/aborted');
+          return;
+        }
+        console.error('Play error:', err);
+      });
+    } else {
+      videoRef.current.pause();
+    }
+  };
+
+  const handleClearTrails = () => {
+    bgDataRef.current = null;
+    motionMaskDataRef.current = null;
+    if (trailCanvasRef.current) {
+      const tCtx = trailCanvasRef.current.getContext('2d');
+      if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
+    }
+    trackedPointsRef.current = [];
+  };
+
   // Start Camera Feed or Video File
   async function startCamera() {
     setCameraLoading(true);
@@ -1168,6 +1243,9 @@ export default function TrackingCanvas() {
 
     setCameraActive(false);
     setFps(0);
+    setIsPaused(false);
+    setCurrentTime(0);
+    setDuration(0);
   }
 
   // Helper to map client mouse/touch positions to internal canvas dimensions (handles object-contain scaling)
@@ -1311,7 +1389,7 @@ export default function TrackingCanvas() {
     if (!ctx || !procCtx || !trailCtx || !blurredVideoCtx) return;
 
     const render = () => {
-      if (video.paused || video.ended || video.videoWidth === 0 || video.videoHeight === 0) {
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
         animationFrameIdRef.current = requestAnimationFrame(render);
         return;
       }
@@ -1326,6 +1404,9 @@ export default function TrackingCanvas() {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
+
+      const w = canvas.width;
+      const h = canvas.height;
 
       // Initialize and resize stampedVideoCanvasRef
       if (!stampedVideoCanvasRef.current) {
@@ -1363,6 +1444,172 @@ export default function TrackingCanvas() {
             removalMaskCtx.drawImage(tempCanvas, 0, 0, removalMaskCanvas.width, removalMaskCanvas.height);
           }
         }
+      }
+
+      if (video.paused || video.ended) {
+        if (stampedVideoCtx) {
+          stampedVideoCtx.drawImage(video, 0, 0, stampedVideoCanvas.width, stampedVideoCanvas.height);
+          
+          if (currentSettings.cloneStampEnabled) {
+            const wVideo = stampedVideoCanvas.width;
+            const hVideo = stampedVideoCanvas.height;
+            
+            if (!cloneDestCanvasRef.current) {
+              cloneDestCanvasRef.current = document.createElement('canvas');
+            }
+            const cloneDestCanvas = cloneDestCanvasRef.current;
+            const cloneDestCtx = cloneDestCanvas.getContext('2d');
+            if (cloneDestCanvas.width !== wVideo || cloneDestCanvas.height !== hVideo) {
+              cloneDestCanvas.width = wVideo;
+              cloneDestCanvas.height = hVideo;
+            }
+            
+            if (cloneDestCtx) {
+              cloneDestCtx.clearRect(0, 0, wVideo, hVideo);
+              cloneDestCtx.drawImage(stampedVideoCanvas, -currentSettings.cloneStampOffsetX, -currentSettings.cloneStampOffsetY);
+              
+              if (!featheredMaskCanvasRef.current) {
+                featheredMaskCanvasRef.current = document.createElement('canvas');
+              }
+              const featheredMaskCanvas = featheredMaskCanvasRef.current;
+              const featheredMaskCtx = featheredMaskCanvas.getContext('2d');
+              if (featheredMaskCanvas.width !== wVideo || featheredMaskCanvas.height !== hVideo) {
+                featheredMaskCanvas.width = wVideo;
+                featheredMaskCanvas.height = hVideo;
+              }
+              
+              if (featheredMaskCtx) {
+                featheredMaskCtx.clearRect(0, 0, wVideo, hVideo);
+                if (currentSettings.cloneStampFeather > 0) {
+                  featheredMaskCtx.filter = `blur(${currentSettings.cloneStampFeather}px)`;
+                }
+                featheredMaskCtx.drawImage(removalMaskCanvas, 0, 0);
+                featheredMaskCtx.filter = 'none';
+                
+                if (!clonedLayerCanvasRef.current) {
+                  clonedLayerCanvasRef.current = document.createElement('canvas');
+                }
+                const clonedLayerCanvas = clonedLayerCanvasRef.current;
+                const clonedLayerCtx = clonedLayerCanvas.getContext('2d');
+                if (clonedLayerCanvas.width !== wVideo || clonedLayerCanvas.height !== hVideo) {
+                  clonedLayerCanvas.width = wVideo;
+                  clonedLayerCanvas.height = hVideo;
+                }
+                
+                if (clonedLayerCtx) {
+                  clonedLayerCtx.clearRect(0, 0, wVideo, hVideo);
+                  clonedLayerCtx.drawImage(cloneDestCanvas, 0, 0);
+                  clonedLayerCtx.globalCompositeOperation = 'destination-in';
+                  clonedLayerCtx.drawImage(featheredMaskCanvas, 0, 0);
+                  clonedLayerCtx.globalCompositeOperation = 'source-over';
+                  
+                  stampedVideoCtx.drawImage(clonedLayerCanvas, 0, 0);
+                }
+              }
+            }
+          }
+        }
+
+        ctx.filter = cameraFilter;
+        ctx.drawImage(stampedVideoCanvas, 0, 0, w, h);
+        ctx.filter = 'none';
+
+        if (currentSettings.enableTrails && trailCanvasRef.current) {
+          const blendMode = (currentSettings.compositeMode === 'none' || !currentSettings.compositeMode)
+            ? 'screen'
+            : currentSettings.compositeMode;
+          ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
+          ctx.drawImage(trailCanvasRef.current, 0, 0, w, h);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        if (currentSettings.showDebugFeed && processingCanvasRef.current) {
+          ctx.globalAlpha = 0.65;
+          ctx.drawImage(processingCanvasRef.current, 0, 0, w, h);
+          ctx.globalAlpha = 1.0;
+        }
+
+        if (currentSettings.cloneStampEnabled && isHoveringRef.current && hoverPosRef.current) {
+          const mouseX = hoverPosRef.current.x;
+          const mouseY = hoverPosRef.current.y;
+          const brushSize = currentSettings.cloneStampBrushSize;
+          const offsetX = currentSettings.cloneStampOffsetX;
+          const offsetY = currentSettings.cloneStampOffsetY;
+          const sourceX = mouseX + offsetX;
+          const sourceY = mouseY + offsetY;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(mouseX, mouseY);
+          ctx.lineTo(sourceX, sourceY);
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.arc(mouseX, mouseY, brushSize / 2, 0, Math.PI * 2);
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([]);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(mouseX, mouseY, 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#3b82f6';
+          ctx.fill();
+          
+          ctx.beginPath();
+          ctx.arc(sourceX, sourceY, brushSize / 2, 0, Math.PI * 2);
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 2]);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(sourceX, sourceY, 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#10b981';
+          ctx.fill();
+          
+          ctx.restore();
+        }
+
+        if (currentSettings.enablePoiMode && 
+            currentSettings.poiOrientation === 'radial' && 
+            activeTabRef.current === 'poi' && 
+            !isRecordingRef.current) {
+          const cx = currentSettings.poiCenterRelativeX * w;
+          const cy = currentSettings.poiCenterRelativeY * h;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+          ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.7)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.moveTo(cx - 40, cy); ctx.lineTo(cx + 40, cy);
+          ctx.moveTo(cx, cy - 40); ctx.lineTo(cx, cy + 40);
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.7)';
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Center of Rotation', cx, cy - 45);
+          ctx.restore();
+        }
+
+        animationFrameIdRef.current = requestAnimationFrame(render);
+        return;
       }
 
       // Draw original video frame and apply Clone Stamp if enabled
@@ -1455,9 +1702,6 @@ export default function TrackingCanvas() {
           strobeVideoCtx.filter = 'none';
         }
       }
-
-      const w = canvas.width;
-      const h = canvas.height;
 
       const isStrobeActive = currentSettings.strobeRate > 0;
       let isStrobeTriggered = false;
@@ -2459,6 +2703,11 @@ export default function TrackingCanvas() {
             playsInline
             muted
             crossOrigin="anonymous"
+            onDurationChange={handleDurationChange}
+            onTimeUpdate={handleTimeUpdate}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onSeeked={handleSeeked}
           />
 
           {/* Actual display canvas which merges raw camera + effects overlay */}
@@ -2660,6 +2909,52 @@ export default function TrackingCanvas() {
                   </button>
                 </div>
               </div>
+
+              {/* Playback Control Bar */}
+              {videoSourceMode === 'file' && cameraActive && (
+                <div className="absolute bottom-24 left-1/2 -translate-x-1/2 w-[90vw] max-w-2xl bg-neutral-900/90 backdrop-blur-md border border-neutral-800 rounded-lg p-3 flex flex-col gap-2 pointer-events-auto shadow-2xl z-20">
+                  <div className="flex items-center gap-3">
+                    {/* Play/Pause Button */}
+                    <button
+                      onClick={handleTogglePlay}
+                      className="p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+                      title={isPaused ? "Play" : "Pause"}
+                    >
+                      {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
+                    </button>
+
+                    {/* Time Display */}
+                    <span className="text-[11px] font-mono text-neutral-400 select-none shrink-0">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+
+                    {/* Progress Slider (Scrubber) */}
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration || 100}
+                      step={0.05}
+                      value={currentTime}
+                      onChange={handleScrubChange}
+                      onMouseDown={handleScrubStart}
+                      onTouchStart={handleScrubStart}
+                      onMouseUp={handleScrubEnd}
+                      onTouchEnd={handleScrubEnd}
+                      className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-neutral-800 appearance-none cursor-pointer hover:bg-neutral-750 transition-all [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+                    />
+
+                    {/* Clear Trails Button */}
+                    <button
+                      onClick={handleClearTrails}
+                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-2.5 py-1 rounded text-[11px] font-medium transition-all active:scale-95 border border-neutral-750 flex items-center gap-1.5 cursor-pointer shrink-0"
+                      title="Clear existing trails"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset Trails</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Bottom control bar (Recording controls) */}
               <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-900 px-4 py-2 rounded border border-neutral-800 pointer-events-auto shadow-2xl z-20">
