@@ -39,6 +39,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
+import {
+  createPovProjectionState,
+  samplePovColumns,
+  matchTrackedPoints,
+  calculateLedStripGeometry,
+  PovProjectionState,
+  PovTrailEntry,
+  PovSample,
+} from '../utils/pov';
 
 const QUICK_PRESETS: {
   id: string;
@@ -335,13 +344,13 @@ function drawLedColumnWithGlow(
   const pWidth = imgData.width;
   const pHeight = imgData.height;
   const data = imgData.data;
-  const px = colIdx % pWidth;
 
-  // Use 'lighter' composite for additive glow blending
+  // Wrap column index safely
+  const px = ((colIdx % pWidth) + pWidth) % pWidth;
+
   const prevComposite = ctx.globalCompositeOperation;
-  if (glowEnabled) {
-    ctx.globalCompositeOperation = 'lighter';
-  }
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = 1;
 
   for (let i = 0; i < numLEDs; i++) {
     const y_ratio = numLEDs > 1 ? i / (numLEDs - 1) : 0.5;
@@ -359,6 +368,7 @@ function drawLedColumnWithGlow(
     const ledAlpha = (a / 255) * opacity;
 
     if (glowEnabled && glowRadius > 0) {
+      ctx.globalCompositeOperation = 'lighter';
       // Draw glow halo first (radial gradient)
       const grad = ctx.createRadialGradient(0, y_pos, 0, 0, y_pos, glowRadius + dotWidth);
       grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${ledAlpha * glowIntensity})`);
@@ -368,7 +378,8 @@ function drawLedColumnWithGlow(
       ctx.fillRect(-(glowRadius + dotWidth), y_pos - (glowRadius + dotWidth), (glowRadius + dotWidth) * 2, (glowRadius + dotWidth) * 2);
     }
 
-    // Draw core LED dot
+    // Draw core LED dot using the standard composite mode
+    ctx.globalCompositeOperation = prevComposite;
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${ledAlpha})`;
     ctx.beginPath();
     ctx.arc(0, y_pos, dotWidth / 2, 0, Math.PI * 2);
@@ -377,6 +388,7 @@ function drawLedColumnWithGlow(
 
   // Restore composite mode
   ctx.globalCompositeOperation = prevComposite;
+  ctx.globalAlpha = prevAlpha;
 }
 
 function updatePoiPattern(
@@ -569,6 +581,7 @@ export default function TrackingCanvas() {
   const bgDataRef = useRef<Float32Array | null>(null);
   const motionMaskDataRef = useRef<ImageData | null>(null);
   const trailCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const povCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -596,9 +609,10 @@ export default function TrackingCanvas() {
   const poiColumnIndexRef = useRef<number>(0);
   // POV trail buffer: stores painted column snapshots per tracked point
   // Each entry: { id: trackingId, x, y, angle, colIdx, length, timestamp }
-  const poiTrailBufferRef = useRef<Map<number, { x: number; y: number; angle: number; colIdx: number; length: number; opacity: number; timestamp: number }[]>>(new Map());
+  const poiTrailBufferRef = useRef<Map<number, PovTrailEntry[]>>(new Map());
   // Track accumulated distance per tracked point (for per-pixel-distance column advancement)
   const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
+  const poiProjectionStateRef = useRef<Map<number, PovProjectionState>>(new Map());
   const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
   const nextTrackedIdRef = useRef<number>(1);
 
@@ -1128,7 +1142,14 @@ export default function TrackingCanvas() {
       const tCtx = trailCanvasRef.current.getContext('2d');
       if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
     }
+    if (povCanvasRef.current) {
+      const pCtx = povCanvasRef.current.getContext('2d');
+      if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+    }
     trackedPointsRef.current = [];
+    poiTrailBufferRef.current.clear();
+    poiProjectionStateRef.current.clear();
+    poiAccumulatedDistRef.current.clear();
   };
 
   // Start Camera Feed or Video File
@@ -1195,6 +1216,10 @@ export default function TrackingCanvas() {
         const tCtx = trailCanvasRef.current.getContext('2d');
         if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
       }
+      if (povCanvasRef.current) {
+        const pCtx = povCanvasRef.current.getContext('2d');
+        if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+      }
       startRenderLoop();
     };
 
@@ -1208,6 +1233,10 @@ export default function TrackingCanvas() {
          if (trailCanvasRef.current) {
            const tCtx = trailCanvasRef.current.getContext('2d');
            if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
+         }
+         if (povCanvasRef.current) {
+           const pCtx = povCanvasRef.current.getContext('2d');
+           if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
          }
          startRenderLoop();
       }
@@ -1680,6 +1709,14 @@ export default function TrackingCanvas() {
         trailCanvas.width = video.videoWidth;
         trailCanvas.height = video.videoHeight;
       }
+      if (!povCanvasRef.current) {
+        povCanvasRef.current = document.createElement('canvas');
+      }
+      const povCanvas = povCanvasRef.current;
+      if (povCanvas.width !== video.videoWidth || povCanvas.height !== video.videoHeight) {
+        povCanvas.width = video.videoWidth;
+        povCanvas.height = video.videoHeight;
+      }
       if (blurredVideoCanvas.width !== video.videoWidth || blurredVideoCanvas.height !== video.videoHeight) {
         blurredVideoCanvas.width = video.videoWidth;
         blurredVideoCanvas.height = video.videoHeight;
@@ -1843,6 +1880,7 @@ export default function TrackingCanvas() {
 
       // Effect: Trail processing and rendering
       const shouldProcessTrails = currentSettings.enableTrails;
+      const usePov = currentSettings.poiPovEnabled;
 
       if (shouldProcessTrails) {
         // Effect: Color Cycle updates continuously for smooth hue rotation
@@ -1938,75 +1976,20 @@ export default function TrackingCanvas() {
                 }
               }
 
-              const updatedTrackedPoints: { id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[] = [];
               const maxMatchDistance = 100;
-
-              for (const blob of currentBlobs) {
-                let bestMatch: any = null;
-                let minDistance = Infinity;
-
-                for (const tp of trackedPointsRef.current) {
-                  const dist = Math.hypot(blob.x - tp.x, blob.y - tp.y);
-                  if (dist < minDistance && dist < maxMatchDistance) {
-                    const alreadyMatched = updatedTrackedPoints.some(u => u.id === tp.id);
-                    if (!alreadyMatched) {
-                      minDistance = dist;
-                      bestMatch = tp;
-                    }
-                  }
-                }
-
-                if (bestMatch) {
-                  // Only update the angle if the blob is elongated (aspect ratio > 1.4)
-                  let newAngle = bestMatch.angle;
-                  if (blob.aspectRatio > 1.4) {
-                    let diff = blob.angle - bestMatch.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    newAngle = bestMatch.angle + diff * 0.25; // exponential smoothing (factor 0.25)
-                  }
-                  
-                  // Smooth length
-                  const newLength = bestMatch.length + (blob.length - bestMatch.length) * 0.2;
-
-                  updatedTrackedPoints.push({
-                    id: bestMatch.id,
-                    x: blob.x,
-                    y: blob.y,
-                    prevX: bestMatch.x,
-                    prevY: bestMatch.y,
-                    angle: newAngle,
-                    length: newLength,
-                    envelopeFrame: (bestMatch.envelopeFrame || 0) + 1,
-                    lastSeen: now
-                  });
-                } else {
-                  updatedTrackedPoints.push({
-                    id: nextTrackedIdRef.current++,
-                    x: blob.x,
-                    y: blob.y,
-                    angle: blob.angle,
-                    length: blob.length,
-                    envelopeFrame: 0,
-                    lastSeen: now
-                  });
-                }
-              }
-
-              for (const tp of trackedPointsRef.current) {
-                const isAlreadyUpdated = updatedTrackedPoints.some(u => u.id === tp.id);
-                if (!isAlreadyUpdated && now - tp.lastSeen < 200) {
-                  updatedTrackedPoints.push(tp);
-                }
-              }
-              trackedPointsRef.current = updatedTrackedPoints;
+              trackedPointsRef.current = matchTrackedPoints(
+                currentBlobs,
+                trackedPointsRef.current,
+                maxMatchDistance,
+                now,
+                () => nextTrackedIdRef.current++
+              );
 
               const patternWidth = patternCanvas.width;
               const patternHeight = patternCanvas.height;
               const imgData = poiPatternDataRef.current;
 
               if (imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
-                const usePov = currentSettings.poiPovEnabled;
                 const povRetention = currentSettings.poiPovRetention || 400;
                 const povFadeMode = currentSettings.poiPovFadeMode || 'exponential';
                 const columnSpacing = currentSettings.poiPovColumnSpacing || 3;
@@ -2080,55 +2063,48 @@ export default function TrackingCanvas() {
                   }
 
                   if (usePov) {
-                    // === NEW POV MODE ===
-                    if (!poiTrailBufferRef.current.has(tp.id)) {
-                      poiTrailBufferRef.current.set(tp.id, []);
-                      poiAccumulatedDistRef.current.set(tp.id, 0);
-                    }
-                    const trail = poiTrailBufferRef.current.get(tp.id)!;
-                    const prevDist = poiAccumulatedDistRef.current.get(tp.id) || 0;
+                    // === NEW POV MODE (refactored sampling) ===
+                    const trail = poiTrailBufferRef.current.get(tp.id) || [];
 
-                    if (motionMode === 'circular') {
-                      const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
-                      const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
-                      const angToCenter = Math.atan2(tp.y - cy, tp.x - cx);
-                      colIdx = Math.floor(((angToCenter + Math.PI) / (Math.PI * 2)) * patternWidth) % patternWidth;
-                      if (colIdx < 0) colIdx += patternWidth;
-                      trail.push({ x: tp.x, y: tp.y, angle: tp.angle, colIdx, length: finalL, opacity: finalOpacity, timestamp: now });
-                    } else {
-                      let distMoved = 0;
-                      if (tp.prevX !== undefined && tp.prevY !== undefined) {
-                        distMoved = Math.hypot(tp.x - tp.prevX, tp.y - tp.prevY);
-                      } else {
-                        // Ensure we paint immediately on the first tracked frame or after a tracker reset
-                        distMoved = columnSpacing;
-                      }
-                      const newAccDist = prevDist + distMoved;
+                    const samples: PovSample[] = samplePovColumns({
+                      id: tp.id,
+                      x: tp.x,
+                      y: tp.y,
+                      prevX: tp.prevX,
+                      prevY: tp.prevY,
+                      angle: tp.angle,
+                      length: finalL,
+                      opacity: finalOpacity,
+                      timestamp: now,
+                      colIdx,
+                      motionMode: motionMode as 'circular' | 'free',
+                      circularCenter: {
+                        x: currentSettings.poiCenterRelativeX * trailCanvas.width,
+                        y: currentSettings.poiCenterRelativeY * trailCanvas.height,
+                      },
+                      columnSpacing,
+                      patternWidth,
+                      projectionState: (
+                        poiProjectionStateRef.current.get(tp.id)
+                        || createPovProjectionState()
+                      ),
+                      existingTrail: trail,
+                    });
 
-                      if (newAccDist >= columnSpacing) {
-                        const columnsToAdvance = Math.floor(newAccDist / columnSpacing);
-                        const lastColIdx = trail.length > 0 ? trail[trail.length - 1].colIdx : colIdx;
-                        
-                        for (let step = 0; step < columnsToAdvance; step++) {
-                          const stepCol = (lastColIdx + step + 1) % patternWidth;
-                          const t_interp = columnsToAdvance > 1 ? (step + 1) / columnsToAdvance : 1;
-                          const interpX = tp.prevX !== undefined ? tp.prevX + (tp.x - tp.prevX) * t_interp : tp.x;
-                          const interpY = tp.prevY !== undefined ? tp.prevY + (tp.y - tp.prevY) * t_interp : tp.y;
-                          
-                          trail.push({
-                            x: interpX,
-                            y: interpY,
-                            angle: tp.angle,
-                            colIdx: stepCol,
-                            length: finalL,
-                            opacity: finalOpacity,
-                            timestamp: now
-                          });
-                        }
-                        poiAccumulatedDistRef.current.set(tp.id, newAccDist % columnSpacing);
-                      } else {
-                        poiAccumulatedDistRef.current.set(tp.id, newAccDist);
+                    if (samples.length > 0) {
+                      poiProjectionStateRef.current.set(tp.id, samples[samples.length - 1].state);
+                      for (const s of samples) {
+                        trail.push({
+                          x: s.x,
+                          y: s.y,
+                          angle: s.angle,
+                          colIdx: s.colIdx,
+                          length: s.length,
+                          opacity: s.opacity,
+                          timestamp: s.timestamp,
+                        });
                       }
+                      poiTrailBufferRef.current.set(tp.id, trail);
                     }
 
                     while (trail.length > 500) {
@@ -2269,68 +2245,77 @@ export default function TrackingCanvas() {
                 }
 
                 // 2. Render all visible trails in the buffer (POV mode)
-                if (usePov) {
-                  const W = currentSettings.poiWidth;
-                  const orientation = currentSettings.poiOrientation;
+                if (usePov && povCanvasRef.current) {
+                  const povCanvas = povCanvasRef.current;
+                  const povCtx = povCanvas.getContext('2d');
+                  if (povCtx) {
+                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
 
-                  for (const [id, trail] of poiTrailBufferRef.current) {
-                    // Evict old entries
-                    const cutoff = now - povRetention;
-                    while (trail.length > 0 && trail[0].timestamp < cutoff) {
-                      trail.shift();
-                    }
+                    const W = currentSettings.poiWidth;
+                    const orientation = currentSettings.poiOrientation;
 
-                    if (trail.length === 0) {
-                      poiTrailBufferRef.current.delete(id);
-                      poiAccumulatedDistRef.current.delete(id);
-                      continue;
-                    }
-
-                    for (const entry of trail) {
-                      const age = now - entry.timestamp;
-                      let fadeFactor = 1.0;
-                      if (povFadeMode === 'linear') {
-                        fadeFactor = 1.0 - (age / povRetention);
-                      } else if (povFadeMode === 'exponential') {
-                        fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
-                      } else if (povFadeMode === 'sharp') {
-                        fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
-                      }
-                      fadeFactor = Math.max(0, Math.min(1, fadeFactor));
-                      const entryOpacity = entry.opacity * fadeFactor;
-                      if (entryOpacity <= 0.01) continue;
-
-                      // Draw the column at this trail entry's position/angle
-                      trailCtx.save();
-                      trailCtx.globalAlpha = entryOpacity;
-
-                      if (orientation === 'club') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(entry.angle);
-                      } else if (orientation === 'radial') {
-                        const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
-                        const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
-                        const angle = Math.atan2(entry.y - cy, entry.x - cx);
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(angle);
-                      } else if (orientation === 'motion') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(entry.angle + Math.PI / 2);
-                      } else if (orientation === 'vertical') {
-                        trailCtx.translate(entry.x, entry.y);
-                      } else if (orientation === 'horizontal') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(Math.PI / 2);
+                    for (const [id, trail] of poiTrailBufferRef.current) {
+                      // Evict old entries
+                      const cutoff = now - povRetention;
+                      while (trail.length > 0 && trail[0].timestamp < cutoff) {
+                        trail.shift();
                       }
 
-                      const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
+                      if (trail.length === 0) {
+                        poiTrailBufferRef.current.delete(id);
+                        poiAccumulatedDistRef.current.delete(id);
+                        continue;
+                      }
 
-                      drawLedColumnWithGlow(
-                        trailCtx, imgData, entry.colIdx, numLEDs, entry.length, W,
-                        glowEnabled, glowRadius, glowIntensity, entryOpacity
-                      );
+                      const cx = currentSettings.poiCenterRelativeX * povCanvas.width;
+                      const cy = currentSettings.poiCenterRelativeY * povCanvas.height;
 
-                      trailCtx.restore();
+                      for (const entry of trail) {
+                        const age = now - entry.timestamp;
+                        let fadeFactor = 1.0;
+                        if (povFadeMode === 'linear') {
+                          fadeFactor = 1.0 - (age / povRetention);
+                        } else if (povFadeMode === 'exponential') {
+                          fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
+                        } else if (povFadeMode === 'sharp') {
+                          fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
+                        }
+                        fadeFactor = Math.max(0, Math.min(1, fadeFactor));
+                        const entryOpacity = entry.opacity * fadeFactor;
+                        if (entryOpacity <= 0.01) continue;
+
+                        const geom = calculateLedStripGeometry(
+                          entry.x,
+                          entry.y,
+                          entry.angle,
+                          entry.length,
+                          entry.motionAngle,
+                          orientation,
+                          cx,
+                          cy,
+                          motionMode as 'circular' | 'free'
+                        );
+
+                        povCtx.save();
+
+                        if (geom.isRadialOrCircular) {
+                          povCtx.translate(geom.translateX, geom.translateY);
+                          povCtx.rotate(geom.rotationAngle);
+                          povCtx.translate(0, geom.middleOffset);
+                        } else {
+                          povCtx.translate(geom.translateX, geom.translateY);
+                          povCtx.rotate(geom.rotationAngle);
+                        }
+
+                        const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
+
+                        drawLedColumnWithGlow(
+                          povCtx, imgData, entry.colIdx, numLEDs, entry.length, W,
+                          glowEnabled, glowRadius, glowIntensity, entryOpacity
+                        );
+
+                        povCtx.restore();
+                      }
                     }
                   }
                 }
@@ -2350,6 +2335,9 @@ export default function TrackingCanvas() {
 
         ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
         ctx.drawImage(trailCanvas, 0, 0, w, h);
+        if (usePov && povCanvasRef.current) {
+          ctx.drawImage(povCanvasRef.current, 0, 0, w, h);
+        }
         ctx.globalCompositeOperation = 'source-over';
       } else {
         trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
