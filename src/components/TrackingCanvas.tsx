@@ -325,20 +325,16 @@ function detectBlobs(maskData: ImageData, maxBlobs: number = 3): BlobPoint[] {
 }
 
 /**
- * Draws a single LED column at the current canvas transform origin.
+ * Draws a single LED column at the current canvas transform origin without glow/blur.
  * Assumes ctx is already translated and rotated so the column goes along the Y axis.
- * Adds optional glow halos around each LED dot for realistic pixel poi look.
  */
-function drawLedColumnWithGlow(
+function drawLedColumn(
   ctx: CanvasRenderingContext2D,
   imgData: ImageData,
   colIdx: number,
   numLEDs: number,
   length: number,    // total length of the LED strip in canvas pixels
   dotWidth: number,  // diameter of each LED dot
-  glowEnabled: boolean,
-  glowRadius: number,
-  glowIntensity: number,
   opacity: number
 ) {
   const pWidth = imgData.width;
@@ -347,10 +343,6 @@ function drawLedColumnWithGlow(
 
   // Wrap column index safely
   const px = ((colIdx % pWidth) + pWidth) % pWidth;
-
-  const prevComposite = ctx.globalCompositeOperation;
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalAlpha = 1;
 
   for (let i = 0; i < numLEDs; i++) {
     const y_ratio = numLEDs > 1 ? i / (numLEDs - 1) : 0.5;
@@ -367,28 +359,11 @@ function drawLedColumnWithGlow(
 
     const ledAlpha = (a / 255) * opacity;
 
-    if (glowEnabled && glowRadius > 0) {
-      ctx.globalCompositeOperation = 'lighter';
-      // Draw glow halo first (radial gradient)
-      const grad = ctx.createRadialGradient(0, y_pos, 0, 0, y_pos, glowRadius + dotWidth);
-      grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${ledAlpha * glowIntensity})`);
-      grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${ledAlpha * glowIntensity * 0.4})`);
-      grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(-(glowRadius + dotWidth), y_pos - (glowRadius + dotWidth), (glowRadius + dotWidth) * 2, (glowRadius + dotWidth) * 2);
-    }
-
-    // Draw core LED dot using the standard composite mode
-    ctx.globalCompositeOperation = prevComposite;
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${ledAlpha})`;
     ctx.beginPath();
     ctx.arc(0, y_pos, dotWidth / 2, 0, Math.PI * 2);
     ctx.fill();
   }
-
-  // Restore composite mode
-  ctx.globalCompositeOperation = prevComposite;
-  ctx.globalAlpha = prevAlpha;
 }
 
 function updatePoiPattern(
@@ -613,6 +588,7 @@ export default function TrackingCanvas() {
   // Track accumulated distance per tracked point (for per-pixel-distance column advancement)
   const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
   const poiProjectionStateRef = useRef<Map<number, PovProjectionState>>(new Map());
+  const lastSettingsStrRef = useRef<string>('');
   const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
   const nextTrackedIdRef = useRef<number>(1);
 
@@ -1990,6 +1966,18 @@ export default function TrackingCanvas() {
               const imgData = poiPatternDataRef.current;
 
               if (imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
+                const povCanvas = povCanvasRef.current;
+                const povCtx = povCanvas ? povCanvas.getContext('2d') : null;
+
+                // Clear canvas immediately if key settings change
+                const settingsStr = `${currentSettings.poiPatternType}-${currentSettings.poiWidth}-${currentSettings.poiOrientation}-${currentSettings.poiGlowEnabled}-${currentSettings.poiGlowRadius}`;
+                if (lastSettingsStrRef.current !== settingsStr) {
+                  lastSettingsStrRef.current = settingsStr;
+                  if (povCtx && povCanvas) {
+                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
+                  }
+                }
+
                 const povRetention = currentSettings.poiPovRetention || 400;
                 const povFadeMode = currentSettings.poiPovFadeMode || 'exponential';
                 const columnSpacing = currentSettings.poiPovColumnSpacing || 3;
@@ -2309,9 +2297,8 @@ export default function TrackingCanvas() {
 
                         const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
 
-                        drawLedColumnWithGlow(
-                          povCtx, imgData, entry.colIdx, numLEDs, entry.length, W,
-                          glowEnabled, glowRadius, glowIntensity, entryOpacity
+                        drawLedColumn(
+                          povCtx, imgData, entry.colIdx, numLEDs, entry.length, W, entryOpacity
                         );
 
                         povCtx.restore();
@@ -2336,7 +2323,24 @@ export default function TrackingCanvas() {
         ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
         ctx.drawImage(trailCanvas, 0, 0, w, h);
         if (usePov && povCanvasRef.current) {
-          ctx.drawImage(povCanvasRef.current, 0, 0, w, h);
+          const povCanvas = povCanvasRef.current;
+          const glowEnabled = currentSettings.poiGlowEnabled;
+          const glowRadius = currentSettings.poiGlowRadius || 6;
+          const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
+
+          // 1. Glow pass
+          if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.filter = `blur(${glowRadius}px)`;
+            ctx.globalAlpha = glowIntensity;
+            ctx.drawImage(povCanvas, 0, 0, w, h);
+            ctx.restore();
+          }
+          // 2. Core pass
+          ctx.save();
+          ctx.drawImage(povCanvas, 0, 0, w, h);
+          ctx.restore();
         }
         ctx.globalCompositeOperation = 'source-over';
       } else {
