@@ -46,7 +46,7 @@ export interface TrackingSettings {
   cloneStampBrushSize: number;
   cloneStampFeather: number;
   enablePoiMode: boolean;
-  poiPatternType: 'swedish' | 'youtube' | 'rainbow' | 'flowers' | 'text' | 'custom';
+  poiPatternType: 'swedish' | 'youtube' | 'rainbow' | 'flowers' | 'text' | 'custom' | 'spiral' | 'chevron' | 'mandala';
   poiText: string;
   poiTextColor: string;
   poiCustomImage: string | null;
@@ -65,5 +65,15 @@ export interface TrackingSettings {
   poiFadeOutTime: number;
   poiWaitTime: number;
   poiFrameInterval: number;
+  // === NEW POV FIELDS ===
+  poiPovEnabled: boolean;           // Toggle between old single-column mode and new POV sweep mode
+  poiPovRetention: number;          // How long (ms) painted columns stay visible before fading (e.g., 300 = 300ms of trailing columns visible)
+  poiPovFadeMode: 'linear' | 'exponential' | 'sharp'; // How the trail fades: linear = even fade, exponential = quick drop, sharp = hard cutoff
+  poiPovColumnSpacing: number;      // Minimum pixel distance the club must travel before the next image column is painted (e.g., 4 = new column every 4px of movement)
+  poiPovMotionMode: 'free' | 'circular'; // 'free' = paint along any motion path, 'circular' = optimize for spinning/circular motion (image wraps around rotation)
+  poiGlowEnabled: boolean;          // Toggle LED glow/bloom halos
+  poiGlowRadius: number;            // Radius of the glow halo in pixels (e.g., 8)
+  poiGlowIntensity: number;         // Glow brightness multiplier 0.0–1.0
+  poiLedCount: number;              // Override number of simulated LEDs per column (0 = auto from club length)
 }
 
