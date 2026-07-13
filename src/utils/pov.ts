@@ -273,9 +273,9 @@ export function calculateLedStripGeometry(
   } else {
     let rotationAngle = 0;
     if (orientation === 'club') {
-      rotationAngle = entryAngle - Math.PI / 2;
+      rotationAngle = entryAngle;
     } else if (orientation === 'motion') {
-      rotationAngle = (entryMotionAngle ?? entryAngle) - Math.PI / 2;
+      rotationAngle = (entryMotionAngle ?? entryAngle) + Math.PI / 2;
     } else if (orientation === 'horizontal') {
       rotationAngle = Math.PI / 2;
     }

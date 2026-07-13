@@ -33,21 +33,14 @@ import {
   Contrast,
   Thermometer,
   Palette,
-  Flame
+  Flame,
+  Save,
+  Bookmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
-import {
-  createPovProjectionState,
-  samplePovColumns,
-  matchTrackedPoints,
-  calculateLedStripGeometry,
-  PovProjectionState,
-  PovTrailEntry,
-  PovSample,
-} from '../utils/pov';
 
 const QUICK_PRESETS: {
   id: string;
@@ -324,25 +317,89 @@ function detectBlobs(maskData: ImageData, maxBlobs: number = 3): BlobPoint[] {
     });
 }
 
+const ledSpriteCache = new Map<string, HTMLCanvasElement>();
+
+function getLedSprite(
+  r: number,
+  g: number,
+  b: number,
+  a: number,
+  glowEnabled: boolean,
+  glowRadius: number,
+  glowIntensity: number,
+  dotWidth: number
+): HTMLCanvasElement {
+  const roundedR = r - (r % 4);
+  const roundedG = g - (g % 4);
+  const roundedB = b - (b % 4);
+  const roundedA = a - (a % 8);
+  const key = `${roundedR},${roundedG},${roundedB},${roundedA},${glowEnabled ? 1 : 0},${glowRadius},${glowIntensity},${dotWidth}`;
+  
+  let sprite = ledSpriteCache.get(key);
+  if (!sprite) {
+    // Cap cache size to avoid memory leaks
+    if (ledSpriteCache.size > 2000) {
+      ledSpriteCache.clear();
+    }
+    sprite = document.createElement('canvas');
+    const size = glowEnabled ? Math.ceil(glowRadius + dotWidth) * 2 : Math.ceil(dotWidth);
+    sprite.width = size;
+    sprite.height = size;
+    const sCtx = sprite.getContext('2d')!;
+    const center = size / 2;
+    const normAlpha = roundedA / 255;
+
+    if (glowEnabled && glowRadius > 0) {
+      const grad = sCtx.createRadialGradient(center, center, 0, center, center, glowRadius + dotWidth);
+      grad.addColorStop(0, `rgba(${roundedR}, ${roundedG}, ${roundedB}, ${normAlpha * glowIntensity})`);
+      grad.addColorStop(0.4, `rgba(${roundedR}, ${roundedG}, ${roundedB}, ${normAlpha * glowIntensity * 0.4})`);
+      grad.addColorStop(1, `rgba(${roundedR}, ${roundedG}, ${roundedB}, 0)`);
+      sCtx.fillStyle = grad;
+      sCtx.fillRect(0, 0, size, size);
+    }
+
+    // Draw core LED dot
+    sCtx.fillStyle = `rgba(${roundedR}, ${roundedG}, ${roundedB}, ${normAlpha})`;
+    sCtx.beginPath();
+    sCtx.arc(center, center, dotWidth / 2, 0, Math.PI * 2);
+    sCtx.fill();
+
+    ledSpriteCache.set(key, sprite);
+  }
+  return sprite;
+}
+
 /**
- * Draws a single LED column at the current canvas transform origin without glow/blur.
+ * Draws a single LED column at the current canvas transform origin.
  * Assumes ctx is already translated and rotated so the column goes along the Y axis.
+ * Adds optional glow halos around each LED dot for realistic pixel poi look.
  */
-function drawLedColumn(
+function drawLedColumnWithGlow(
   ctx: CanvasRenderingContext2D,
   imgData: ImageData,
   colIdx: number,
   numLEDs: number,
   length: number,    // total length of the LED strip in canvas pixels
   dotWidth: number,  // diameter of each LED dot
+  glowEnabled: boolean,
+  glowRadius: number,
+  glowIntensity: number,
   opacity: number
 ) {
   const pWidth = imgData.width;
   const pHeight = imgData.height;
   const data = imgData.data;
+  const px = colIdx % pWidth;
 
-  // Wrap column index safely
-  const px = ((colIdx % pWidth) + pWidth) % pWidth;
+  // Use 'lighter' composite for additive glow blending
+  const prevComposite = ctx.globalCompositeOperation;
+  if (glowEnabled) {
+    ctx.globalCompositeOperation = 'lighter';
+  }
+
+  // Set globalAlpha to scale the sprites' opacity correctly
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = opacity;
 
   for (let i = 0; i < numLEDs; i++) {
     const y_ratio = numLEDs > 1 ? i / (numLEDs - 1) : 0.5;
@@ -357,19 +414,19 @@ function drawLedColumn(
 
     if (a <= 15) continue;
 
-    const ledAlpha = (a / 255) * opacity;
-
-    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${ledAlpha})`;
-    ctx.beginPath();
-    ctx.arc(0, y_pos, dotWidth / 2, 0, Math.PI * 2);
-    ctx.fill();
+    const sprite = getLedSprite(r, g, b, a, glowEnabled, glowRadius, glowIntensity, dotWidth);
+    const size = sprite.width;
+    ctx.drawImage(sprite, -size / 2, y_pos - size / 2);
   }
+
+  // Restore composite mode and global alpha
+  ctx.globalCompositeOperation = prevComposite;
+  ctx.globalAlpha = prevAlpha;
 }
 
 function updatePoiPattern(
   canvas: HTMLCanvasElement,
-  currentSettings: TrackingSettings,
-  customImageElement: HTMLImageElement | null
+  currentSettings: TrackingSettings
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -379,39 +436,7 @@ function updatePoiPattern(
 
   const type = currentSettings.poiPatternType;
 
-  if (type === 'swedish') {
-    canvas.width = 160;
-    canvas.height = 100;
-    ctx.fillStyle = '#005293';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#FECC02';
-    ctx.fillRect(0, 40, 160, 20);
-    ctx.fillRect(50, 0, 20, 100);
-  }
-  else if (type === 'youtube') {
-    canvas.width = 150;
-    canvas.height = 100;
-    // Keep background transparent to avoid erasing trails
-    ctx.fillStyle = '#FF0000';
-    const r = 20;
-    const x = 15, y = 15, w = 120, h = 70;
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.moveTo(60, 35);
-    ctx.lineTo(60, 65);
-    ctx.lineTo(95, 50);
-    ctx.closePath();
-    ctx.fill();
-  }
-  else if (type === 'rainbow') {
+  if (type === 'rainbow') {
     canvas.width = 256;
     canvas.height = 64;
     const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
@@ -447,38 +472,6 @@ function updatePoiPattern(
       ctx.beginPath();
       ctx.arc(cx, cy, 9, 0, Math.PI * 2);
       ctx.fill();
-    }
-  }
-  else if (type === 'text') {
-    const text = currentSettings.poiText || 'JUGGLE';
-    const textColor = currentSettings.poiTextColor || '#ff2a85';
-    ctx.font = 'bold 36px sans-serif';
-    ctx.textBaseline = 'middle';
-    const textWidth = ctx.measureText(text).width;
-    canvas.width = Math.max(textWidth + 40, 100);
-    canvas.height = 64;
-    // Keep background transparent to avoid erasing trails
-    ctx.fillStyle = textColor;
-    ctx.font = 'bold 36px sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-  }
-  else if (type === 'custom') {
-    if (customImageElement && customImageElement.complete && customImageElement.naturalWidth > 0) {
-      canvas.width = customImageElement.naturalWidth;
-      canvas.height = customImageElement.naturalHeight;
-      ctx.drawImage(customImageElement, 0, 0);
-    } else {
-      canvas.width = 100;
-      canvas.height = 64;
-      ctx.fillStyle = '#222222';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('No Image Uploaded', 50, 32);
     }
   }
   else if (type === 'spiral') {
@@ -539,6 +532,113 @@ function updatePoiPattern(
     }
     ctx.globalAlpha = 1.0;
   }
+  else if (type === 'plasma') {
+    // Organic, blobby interference pattern — two overlapping sine fields produce lava-lamp-like cells
+    canvas.width = 320;
+    canvas.height = 80;
+    for (let x = 0; x < canvas.width; x++) {
+      for (let y = 0; y < canvas.height; y++) {
+        const normX = x / canvas.width;
+        const normY = y / canvas.height;
+        const v1 = Math.sin(normX * Math.PI * 8);
+        const v2 = Math.sin(normY * Math.PI * 6 + normX * Math.PI * 4);
+        const v3 = Math.sin((normX + normY) * Math.PI * 5);
+        const v4 = Math.sin(Math.sqrt(normX * normX + normY * normY) * Math.PI * 12);
+        const v = (v1 + v2 + v3 + v4) / 4;
+        const h = ((v + 1) * 180) % 360;
+        const s = 80 + v * 20;
+        const l = 35 + v * 30;
+        ctx.fillStyle = `hsl(${h}, ${s}%, ${l}%)`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  else if (type === 'starburst') {
+    // Radial rays emanating outward — produces a sunburst/explosion look when spun
+    canvas.width = 360;
+    canvas.height = 80;
+    const numRays = 18;
+    const palette = ['#FF1744', '#FF9100', '#FFEA00', '#00E676', '#00B0FF', '#D500F9'];
+    for (let x = 0; x < canvas.width; x++) {
+      for (let y = 0; y < canvas.height; y++) {
+        const normX = x / canvas.width;
+        const normY = (y / canvas.height) * 2 - 1; // -1 to 1
+        const rayAngle = normX * Math.PI * 2 * (numRays / (2 * Math.PI));
+        const rayIntensity = Math.pow(Math.abs(Math.cos(rayAngle * Math.PI)), 3);
+        const distFromCenter = Math.abs(normY);
+        const brightness = rayIntensity * (1 - distFromCenter * 0.6);
+        if (brightness > 0.05) {
+          const colorIdx = Math.floor(normX * numRays) % palette.length;
+          ctx.fillStyle = palette[colorIdx];
+          ctx.globalAlpha = Math.min(1, brightness);
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    }
+    ctx.globalAlpha = 1.0;
+  }
+  else if (type === 'plaid') {
+    // Overlapping horizontal & vertical bands with transparency — tartan/plaid weave effect
+    canvas.width = 256;
+    canvas.height = 80;
+    const bandColors = [
+      { color: '#C62828', width: 12 },
+      { color: '#1565C0', width: 8 },
+      { color: '#2E7D32', width: 6 },
+      { color: '#F9A825', width: 4 },
+    ];
+    // Base dark fill
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Vertical bands
+    let vOffset = 0;
+    for (let i = 0; vOffset < canvas.width; i++) {
+      const band = bandColors[i % bandColors.length];
+      ctx.fillStyle = band.color;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(vOffset, 0, band.width, canvas.height);
+      vOffset += band.width + 10;
+    }
+    // Horizontal bands (overlaid with multiply-like transparency)
+    let hOffset = 0;
+    for (let i = 0; hOffset < canvas.height; i++) {
+      const band = bandColors[(i + 2) % bandColors.length];
+      ctx.fillStyle = band.color;
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(0, hOffset, canvas.width, band.width);
+      hOffset += band.width + 8;
+    }
+    ctx.globalAlpha = 1.0;
+  }
+  else if (type === 'wave') {
+    // Layered sine waves stacked vertically — ocean/aurora wave effect
+    canvas.width = 360;
+    canvas.height = 80;
+    const waveColors = ['#0D47A1', '#1B5E20', '#4A148C', '#BF360C', '#00838F'];
+    // Dark base
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const numWaves = waveColors.length;
+    for (let w = 0; w < numWaves; w++) {
+      const baseY = ((w + 1) / (numWaves + 1)) * canvas.height;
+      const amplitude = canvas.height / (numWaves + 2);
+      const frequency = 2 + w * 0.7;
+      const phaseShift = w * 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height);
+      for (let x = 0; x <= canvas.width; x++) {
+        const normX = x / canvas.width;
+        const y = baseY + Math.sin(normX * Math.PI * 2 * frequency + phaseShift) * amplitude;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(canvas.width, canvas.height);
+      ctx.closePath();
+      ctx.fillStyle = waveColors[w];
+      ctx.globalAlpha = 0.45;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+  }
 }
 
 export default function TrackingCanvas() {
@@ -556,7 +656,6 @@ export default function TrackingCanvas() {
   const bgDataRef = useRef<Float32Array | null>(null);
   const motionMaskDataRef = useRef<ImageData | null>(null);
   const trailCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const povCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -580,15 +679,13 @@ export default function TrackingCanvas() {
   // Pixel Poi refs
   const poiPatternCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const poiPatternDataRef = useRef<ImageData | null>(null);
-  const poiCustomImageElementRef = useRef<HTMLImageElement | null>(null);
+
   const poiColumnIndexRef = useRef<number>(0);
   // POV trail buffer: stores painted column snapshots per tracked point
   // Each entry: { id: trackingId, x, y, angle, colIdx, length, timestamp }
-  const poiTrailBufferRef = useRef<Map<number, PovTrailEntry[]>>(new Map());
+  const poiTrailBufferRef = useRef<Map<number, { x: number; y: number; angle: number; colIdx: number; length: number; opacity: number; timestamp: number }[]>>(new Map());
   // Track accumulated distance per tracked point (for per-pixel-distance column advancement)
   const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
-  const poiProjectionStateRef = useRef<Map<number, PovProjectionState>>(new Map());
-  const lastSettingsStrRef = useRef<string>('');
   const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
   const nextTrackedIdRef = useRef<number>(1);
 
@@ -651,10 +748,7 @@ export default function TrackingCanvas() {
     cloneStampBrushSize: 30,
     cloneStampFeather: 15,
     enablePoiMode: false,
-    poiPatternType: 'swedish',
-    poiText: 'JUGGLE',
-    poiTextColor: '#ff2a85',
-    poiCustomImage: null,
+    poiPatternType: 'rainbow',
     poiHeight: 0, // 0 means auto-detect from club length
     poiWidth: 3,
     poiOrientation: 'club',
@@ -690,22 +784,10 @@ export default function TrackingCanvas() {
 
   useEffect(() => {
     poiPatternDataRef.current = null;
-    if (settings.poiCustomImage) {
-      const img = new Image();
-      img.onload = () => {
-        poiCustomImageElementRef.current = img;
-        if (poiPatternCanvasRef.current) {
-          updatePoiPattern(poiPatternCanvasRef.current, settings, img);
-        }
-      };
-      img.src = settings.poiCustomImage;
-    } else {
-      poiCustomImageElementRef.current = null;
-      if (poiPatternCanvasRef.current) {
-        updatePoiPattern(poiPatternCanvasRef.current, settings, null);
-      }
+    if (poiPatternCanvasRef.current) {
+      updatePoiPattern(poiPatternCanvasRef.current, settings);
     }
-  }, [settings.poiCustomImage, settings.poiPatternType, settings.poiText, settings.poiTextColor]);
+  }, [settings.poiPatternType]);
 
   // Gemini State
   const [apiKeyInput, setApiKeyInput] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
@@ -828,6 +910,77 @@ export default function TrackingCanvas() {
       setOriginalSettings(null);
       setAppliedOption(null);
       setAppliedPresetId(null);
+    }
+  };
+
+  // === Saved Presets (localStorage) ===
+  interface SavedPreset {
+    id: string;
+    name: string;
+    settings: TrackingSettings;
+    savedAt: number;
+  }
+
+  const SAVED_PRESETS_KEY = 'juggeffect_saved_presets';
+
+  const loadSavedPresets = (): SavedPreset[] => {
+    try {
+      const raw = localStorage.getItem(SAVED_PRESETS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(loadSavedPresets);
+  const [savePresetName, setSavePresetName] = useState('');
+
+  const persistPresets = (presets: SavedPreset[]) => {
+    setSavedPresets(presets);
+    localStorage.setItem(SAVED_PRESETS_KEY, JSON.stringify(presets));
+  };
+
+  const handleSavePreset = () => {
+    const name = savePresetName.trim();
+    if (!name) return;
+    const preset: SavedPreset = {
+      id: Date.now().toString(36),
+      name,
+      settings: { ...settings },
+      savedAt: Date.now(),
+    };
+    persistPresets([preset, ...savedPresets]);
+    setSavePresetName('');
+  };
+
+  const handleLoadPreset = (preset: SavedPreset) => {
+    setSettings(preset.settings);
+    setOriginalSettings(null);
+    setAppliedPresetId(null);
+    setAppliedOption(null);
+  };
+
+  const handleDeletePreset = (id: string) => {
+    const savedPassword = localStorage.getItem('juggeffect_preset_delete_password');
+    if (!savedPassword) {
+      const newPass = prompt("Set a password to protect your presets from deletion:");
+      if (newPass === null) return; // User cancelled
+      const trimmed = newPass.trim();
+      if (!trimmed) {
+        alert("Password cannot be empty.");
+        return;
+      }
+      localStorage.setItem('juggeffect_preset_delete_password', trimmed);
+      persistPresets(savedPresets.filter((p) => p.id !== id));
+      alert("Preset deleted. Password set for future deletions.");
+    } else {
+      const input = prompt("Enter password to delete this preset:");
+      if (input === null) return; // User cancelled
+      if (input === savedPassword) {
+        persistPresets(savedPresets.filter((p) => p.id !== id));
+      } else {
+        alert("Incorrect password. Deletion cancelled.");
+      }
     }
   };
 
@@ -1118,14 +1271,7 @@ export default function TrackingCanvas() {
       const tCtx = trailCanvasRef.current.getContext('2d');
       if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
     }
-    if (povCanvasRef.current) {
-      const pCtx = povCanvasRef.current.getContext('2d');
-      if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
-    }
     trackedPointsRef.current = [];
-    poiTrailBufferRef.current.clear();
-    poiProjectionStateRef.current.clear();
-    poiAccumulatedDistRef.current.clear();
   };
 
   // Start Camera Feed or Video File
@@ -1192,10 +1338,6 @@ export default function TrackingCanvas() {
         const tCtx = trailCanvasRef.current.getContext('2d');
         if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
       }
-      if (povCanvasRef.current) {
-        const pCtx = povCanvasRef.current.getContext('2d');
-        if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
-      }
       startRenderLoop();
     };
 
@@ -1209,10 +1351,6 @@ export default function TrackingCanvas() {
          if (trailCanvasRef.current) {
            const tCtx = trailCanvasRef.current.getContext('2d');
            if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
-         }
-         if (povCanvasRef.current) {
-           const pCtx = povCanvasRef.current.getContext('2d');
-           if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
          }
          startRenderLoop();
       }
@@ -1685,14 +1823,6 @@ export default function TrackingCanvas() {
         trailCanvas.width = video.videoWidth;
         trailCanvas.height = video.videoHeight;
       }
-      if (!povCanvasRef.current) {
-        povCanvasRef.current = document.createElement('canvas');
-      }
-      const povCanvas = povCanvasRef.current;
-      if (povCanvas.width !== video.videoWidth || povCanvas.height !== video.videoHeight) {
-        povCanvas.width = video.videoWidth;
-        povCanvas.height = video.videoHeight;
-      }
       if (blurredVideoCanvas.width !== video.videoWidth || blurredVideoCanvas.height !== video.videoHeight) {
         blurredVideoCanvas.width = video.videoWidth;
         blurredVideoCanvas.height = video.videoHeight;
@@ -1856,7 +1986,6 @@ export default function TrackingCanvas() {
 
       // Effect: Trail processing and rendering
       const shouldProcessTrails = currentSettings.enableTrails;
-      const usePov = currentSettings.poiPovEnabled;
 
       if (shouldProcessTrails) {
         // Effect: Color Cycle updates continuously for smooth hue rotation
@@ -1916,7 +2045,7 @@ export default function TrackingCanvas() {
           if (currentSettings.enablePoiMode) {
             const patternCanvas = poiPatternCanvasRef.current || (poiPatternCanvasRef.current = document.createElement('canvas'));
             if (!poiPatternDataRef.current) {
-              updatePoiPattern(patternCanvas, currentSettings, poiCustomImageElementRef.current);
+              updatePoiPattern(patternCanvas, currentSettings);
               const pCtx = patternCanvas.getContext('2d');
               if (pCtx && patternCanvas.width > 0 && patternCanvas.height > 0) {
                 poiPatternDataRef.current = pCtx.getImageData(0, 0, patternCanvas.width, patternCanvas.height);
@@ -1952,32 +2081,91 @@ export default function TrackingCanvas() {
                 }
               }
 
+              const updatedTrackedPoints: { id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[] = [];
               const maxMatchDistance = 100;
-              trackedPointsRef.current = matchTrackedPoints(
-                currentBlobs,
-                trackedPointsRef.current,
-                maxMatchDistance,
-                now,
-                () => nextTrackedIdRef.current++
-              );
+
+              for (const blob of currentBlobs) {
+                let bestMatch: any = null;
+                let minDistance = Infinity;
+
+                for (const tp of trackedPointsRef.current) {
+                  const dist = Math.hypot(blob.x - tp.x, blob.y - tp.y);
+                  if (dist < minDistance && dist < maxMatchDistance) {
+                    const alreadyMatched = updatedTrackedPoints.some(u => u.id === tp.id);
+                    if (!alreadyMatched) {
+                      minDistance = dist;
+                      bestMatch = tp;
+                    }
+                  }
+                }
+
+                if (bestMatch) {
+                  // Update angle from PCA when blob is elongated, fall back to motion direction otherwise
+                  let newAngle = bestMatch.angle;
+                  if (blob.aspectRatio > 1.15) {
+                    // PCA angle is reliable when the blob is elongated
+                    // Handle the ±π ambiguity of atan2-based PCA: pick the closer of the two orientations
+                    let diff = blob.angle - bestMatch.angle;
+                    while (diff < -Math.PI / 2) diff += Math.PI;
+                    while (diff > Math.PI / 2) diff -= Math.PI;
+                    newAngle = bestMatch.angle + diff * 0.5;
+                  } else if (bestMatch.prevX !== undefined && bestMatch.prevY !== undefined) {
+                    // Blob is too round for reliable PCA — derive angle from motion direction
+                    const dx = blob.x - bestMatch.x;
+                    const dy = blob.y - bestMatch.y;
+                    const speed = Math.hypot(dx, dy);
+                    if (speed > 3) {
+                      // Motion direction is perpendicular to the club body, so add π/2
+                      const motionAngle = Math.atan2(dy, dx) + Math.PI / 2;
+                      let diff = motionAngle - bestMatch.angle;
+                      // Normalize to [-π/2, π/2] since club orientation is bidirectional
+                      while (diff < -Math.PI / 2) diff += Math.PI;
+                      while (diff > Math.PI / 2) diff -= Math.PI;
+                      newAngle = bestMatch.angle + diff * 0.3;
+                    }
+                  }
+                  
+                  // Smooth length
+                  const newLength = bestMatch.length + (blob.length - bestMatch.length) * 0.2;
+
+                  updatedTrackedPoints.push({
+                    id: bestMatch.id,
+                    x: blob.x,
+                    y: blob.y,
+                    prevX: bestMatch.x,
+                    prevY: bestMatch.y,
+                    angle: newAngle,
+                    length: newLength,
+                    envelopeFrame: (bestMatch.envelopeFrame || 0) + 1,
+                    lastSeen: now
+                  });
+                } else {
+                  updatedTrackedPoints.push({
+                    id: nextTrackedIdRef.current++,
+                    x: blob.x,
+                    y: blob.y,
+                    angle: blob.angle,
+                    length: blob.length,
+                    envelopeFrame: 0,
+                    lastSeen: now
+                  });
+                }
+              }
+
+              for (const tp of trackedPointsRef.current) {
+                const isAlreadyUpdated = updatedTrackedPoints.some(u => u.id === tp.id);
+                if (!isAlreadyUpdated && now - tp.lastSeen < 200) {
+                  updatedTrackedPoints.push(tp);
+                }
+              }
+              trackedPointsRef.current = updatedTrackedPoints;
 
               const patternWidth = patternCanvas.width;
               const patternHeight = patternCanvas.height;
               const imgData = poiPatternDataRef.current;
 
               if (imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
-                const povCanvas = povCanvasRef.current;
-                const povCtx = povCanvas ? povCanvas.getContext('2d') : null;
-
-                // Clear canvas immediately if key settings change
-                const settingsStr = `${currentSettings.poiPatternType}-${currentSettings.poiWidth}-${currentSettings.poiOrientation}-${currentSettings.poiGlowEnabled}-${currentSettings.poiGlowRadius}`;
-                if (lastSettingsStrRef.current !== settingsStr) {
-                  lastSettingsStrRef.current = settingsStr;
-                  if (povCtx && povCanvas) {
-                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
-                  }
-                }
-
+                const usePov = currentSettings.poiPovEnabled;
                 const povRetention = currentSettings.poiPovRetention || 400;
                 const povFadeMode = currentSettings.poiPovFadeMode || 'exponential';
                 const columnSpacing = currentSettings.poiPovColumnSpacing || 3;
@@ -2051,48 +2239,55 @@ export default function TrackingCanvas() {
                   }
 
                   if (usePov) {
-                    // === NEW POV MODE (refactored sampling) ===
-                    const trail = poiTrailBufferRef.current.get(tp.id) || [];
+                    // === NEW POV MODE ===
+                    if (!poiTrailBufferRef.current.has(tp.id)) {
+                      poiTrailBufferRef.current.set(tp.id, []);
+                      poiAccumulatedDistRef.current.set(tp.id, 0);
+                    }
+                    const trail = poiTrailBufferRef.current.get(tp.id)!;
+                    const prevDist = poiAccumulatedDistRef.current.get(tp.id) || 0;
 
-                    const samples: PovSample[] = samplePovColumns({
-                      id: tp.id,
-                      x: tp.x,
-                      y: tp.y,
-                      prevX: tp.prevX,
-                      prevY: tp.prevY,
-                      angle: tp.angle,
-                      length: finalL,
-                      opacity: finalOpacity,
-                      timestamp: now,
-                      colIdx,
-                      motionMode: motionMode as 'circular' | 'free',
-                      circularCenter: {
-                        x: currentSettings.poiCenterRelativeX * trailCanvas.width,
-                        y: currentSettings.poiCenterRelativeY * trailCanvas.height,
-                      },
-                      columnSpacing,
-                      patternWidth,
-                      projectionState: (
-                        poiProjectionStateRef.current.get(tp.id)
-                        || createPovProjectionState()
-                      ),
-                      existingTrail: trail,
-                    });
-
-                    if (samples.length > 0) {
-                      poiProjectionStateRef.current.set(tp.id, samples[samples.length - 1].state);
-                      for (const s of samples) {
-                        trail.push({
-                          x: s.x,
-                          y: s.y,
-                          angle: s.angle,
-                          colIdx: s.colIdx,
-                          length: s.length,
-                          opacity: s.opacity,
-                          timestamp: s.timestamp,
-                        });
+                    if (motionMode === 'circular') {
+                      const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
+                      const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
+                      const angToCenter = Math.atan2(tp.y - cy, tp.x - cx);
+                      colIdx = Math.floor(((angToCenter + Math.PI) / (Math.PI * 2)) * patternWidth) % patternWidth;
+                      if (colIdx < 0) colIdx += patternWidth;
+                      trail.push({ x: tp.x, y: tp.y, angle: tp.angle, colIdx, length: finalL, opacity: finalOpacity, timestamp: now });
+                    } else {
+                      let distMoved = 0;
+                      if (tp.prevX !== undefined && tp.prevY !== undefined) {
+                        distMoved = Math.hypot(tp.x - tp.prevX, tp.y - tp.prevY);
+                      } else {
+                        // Ensure we paint immediately on the first tracked frame or after a tracker reset
+                        distMoved = columnSpacing;
                       }
-                      poiTrailBufferRef.current.set(tp.id, trail);
+                      const newAccDist = prevDist + distMoved;
+
+                      if (newAccDist >= columnSpacing) {
+                        const columnsToAdvance = Math.floor(newAccDist / columnSpacing);
+                        const lastColIdx = trail.length > 0 ? trail[trail.length - 1].colIdx : colIdx;
+                        
+                        for (let step = 0; step < columnsToAdvance; step++) {
+                          const stepCol = (lastColIdx + step + 1) % patternWidth;
+                          const t_interp = columnsToAdvance > 1 ? (step + 1) / columnsToAdvance : 1;
+                          const interpX = tp.prevX !== undefined ? tp.prevX + (tp.x - tp.prevX) * t_interp : tp.x;
+                          const interpY = tp.prevY !== undefined ? tp.prevY + (tp.y - tp.prevY) * t_interp : tp.y;
+                          
+                          trail.push({
+                            x: interpX,
+                            y: interpY,
+                            angle: tp.angle,
+                            colIdx: stepCol,
+                            length: finalL,
+                            opacity: finalOpacity,
+                            timestamp: now
+                          });
+                        }
+                        poiAccumulatedDistRef.current.set(tp.id, newAccDist % columnSpacing);
+                      } else {
+                        poiAccumulatedDistRef.current.set(tp.id, newAccDist);
+                      }
                     }
 
                     while (trail.length > 500) {
@@ -2233,76 +2428,68 @@ export default function TrackingCanvas() {
                 }
 
                 // 2. Render all visible trails in the buffer (POV mode)
-                if (usePov && povCanvasRef.current) {
-                  const povCanvas = povCanvasRef.current;
-                  const povCtx = povCanvas.getContext('2d');
-                  if (povCtx) {
-                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
+                if (usePov) {
+                  const W = currentSettings.poiWidth;
+                  const orientation = currentSettings.poiOrientation;
 
-                    const W = currentSettings.poiWidth;
-                    const orientation = currentSettings.poiOrientation;
+                  for (const [id, trail] of poiTrailBufferRef.current) {
+                    // Evict old entries
+                    const cutoff = now - povRetention;
+                    while (trail.length > 0 && trail[0].timestamp < cutoff) {
+                      trail.shift();
+                    }
 
-                    for (const [id, trail] of poiTrailBufferRef.current) {
-                      // Evict old entries
-                      const cutoff = now - povRetention;
-                      while (trail.length > 0 && trail[0].timestamp < cutoff) {
-                        trail.shift();
+                    if (trail.length === 0) {
+                      poiTrailBufferRef.current.delete(id);
+                      poiAccumulatedDistRef.current.delete(id);
+                      continue;
+                    }
+
+                    for (const entry of trail) {
+                      const age = now - entry.timestamp;
+                      let fadeFactor = 1.0;
+                      if (povFadeMode === 'linear') {
+                        fadeFactor = 1.0 - (age / povRetention);
+                      } else if (povFadeMode === 'exponential') {
+                        fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
+                      } else if (povFadeMode === 'sharp') {
+                        fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
+                      }
+                      fadeFactor = Math.max(0, Math.min(1, fadeFactor));
+                      const entryOpacity = entry.opacity * fadeFactor;
+                      if (entryOpacity <= 0.01) continue;
+
+                      // Draw the column at this trail entry's position/angle
+                      trailCtx.save();
+                      trailCtx.globalAlpha = entryOpacity;
+
+                      if (orientation === 'club') {
+                        trailCtx.translate(entry.x, entry.y);
+                        trailCtx.rotate(entry.angle);
+                      } else if (orientation === 'radial') {
+                        const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
+                        const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
+                        const angle = Math.atan2(entry.y - cy, entry.x - cx);
+                        trailCtx.translate(entry.x, entry.y);
+                        trailCtx.rotate(angle);
+                      } else if (orientation === 'motion') {
+                        trailCtx.translate(entry.x, entry.y);
+                        trailCtx.rotate(entry.angle + Math.PI / 2);
+                      } else if (orientation === 'vertical') {
+                        trailCtx.translate(entry.x, entry.y);
+                      } else if (orientation === 'horizontal') {
+                        trailCtx.translate(entry.x, entry.y);
+                        trailCtx.rotate(Math.PI / 2);
                       }
 
-                      if (trail.length === 0) {
-                        poiTrailBufferRef.current.delete(id);
-                        poiAccumulatedDistRef.current.delete(id);
-                        continue;
-                      }
+                      const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
 
-                      const cx = currentSettings.poiCenterRelativeX * povCanvas.width;
-                      const cy = currentSettings.poiCenterRelativeY * povCanvas.height;
+                      drawLedColumnWithGlow(
+                        trailCtx, imgData, entry.colIdx, numLEDs, entry.length, W,
+                        glowEnabled, glowRadius, glowIntensity, entryOpacity
+                      );
 
-                      for (const entry of trail) {
-                        const age = now - entry.timestamp;
-                        let fadeFactor = 1.0;
-                        if (povFadeMode === 'linear') {
-                          fadeFactor = 1.0 - (age / povRetention);
-                        } else if (povFadeMode === 'exponential') {
-                          fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
-                        } else if (povFadeMode === 'sharp') {
-                          fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
-                        }
-                        fadeFactor = Math.max(0, Math.min(1, fadeFactor));
-                        const entryOpacity = entry.opacity * fadeFactor;
-                        if (entryOpacity <= 0.01) continue;
-
-                        const geom = calculateLedStripGeometry(
-                          entry.x,
-                          entry.y,
-                          entry.angle,
-                          entry.length,
-                          entry.motionAngle,
-                          orientation,
-                          cx,
-                          cy,
-                          motionMode as 'circular' | 'free'
-                        );
-
-                        povCtx.save();
-
-                        if (geom.isRadialOrCircular) {
-                          povCtx.translate(geom.translateX, geom.translateY);
-                          povCtx.rotate(geom.rotationAngle);
-                          povCtx.translate(0, geom.middleOffset);
-                        } else {
-                          povCtx.translate(geom.translateX, geom.translateY);
-                          povCtx.rotate(geom.rotationAngle);
-                        }
-
-                        const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
-
-                        drawLedColumn(
-                          povCtx, imgData, entry.colIdx, numLEDs, entry.length, W, entryOpacity
-                        );
-
-                        povCtx.restore();
-                      }
+                      trailCtx.restore();
                     }
                   }
                 }
@@ -2322,26 +2509,6 @@ export default function TrackingCanvas() {
 
         ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
         ctx.drawImage(trailCanvas, 0, 0, w, h);
-        if (usePov && povCanvasRef.current) {
-          const povCanvas = povCanvasRef.current;
-          const glowEnabled = currentSettings.poiGlowEnabled;
-          const glowRadius = currentSettings.poiGlowRadius || 6;
-          const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
-
-          // 1. Glow pass
-          if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.filter = `blur(${glowRadius}px)`;
-            ctx.globalAlpha = glowIntensity;
-            ctx.drawImage(povCanvas, 0, 0, w, h);
-            ctx.restore();
-          }
-          // 2. Core pass
-          ctx.save();
-          ctx.drawImage(povCanvas, 0, 0, w, h);
-          ctx.restore();
-        }
         ctx.globalCompositeOperation = 'source-over';
       } else {
         trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
@@ -3642,6 +3809,67 @@ export default function TrackingCanvas() {
                       </div>
                     )}
                   </div>
+
+                  {/* Saved Presets Section */}
+                  <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+                    <div className="flex items-center gap-2 border-b border-neutral-800 pb-2">
+                      <Bookmark className="w-4 h-4 text-blue-400" />
+                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                        Saved Presets
+                      </h3>
+                    </div>
+
+                    {/* Save current */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Preset name…"
+                        value={savePresetName}
+                        onChange={(e) => setSavePresetName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSavePreset()}
+                        className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-500 transition-all placeholder:text-neutral-600"
+                      />
+                      <button
+                        onClick={handleSavePreset}
+                        disabled={!savePresetName.trim()}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium transition-all cursor-pointer bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-30 disabled:cursor-not-allowed active:scale-97"
+                      >
+                        <Save className="w-3 h-3" />
+                        Save
+                      </button>
+                    </div>
+
+                    {/* List */}
+                    {savedPresets.length === 0 ? (
+                      <p className="text-[11px] text-neutral-500 text-center py-3">
+                        No saved presets yet. Tweak your settings and save them above.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+                        {savedPresets.map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between bg-neutral-950/60 border border-neutral-800 rounded px-3 py-2 group hover:border-neutral-700 transition-all"
+                          >
+                            <button
+                              onClick={() => handleLoadPreset(p)}
+                              className="flex-1 text-left text-xs text-neutral-300 hover:text-white transition-colors cursor-pointer truncate"
+                              title={`Load "${p.name}"`}
+                            >
+                              {p.name}
+                            </button>
+                            <button
+                              onClick={() => handleDeletePreset(p.id)}
+                              className="text-neutral-600 hover:text-red-400 transition-colors cursor-pointer ml-2 opacity-0 group-hover:opacity-100 p-0.5"
+                              title="Delete preset"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
 
@@ -3798,7 +4026,7 @@ export default function TrackingCanvas() {
                       <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
                         <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
                         <p className="text-xs text-neutral-300 leading-relaxed">
-                          Projects colors from templates, custom text, or uploaded images along the path of moving LED props or mouse drags.
+                          Projects colors from pattern templates along the path of moving LED props or mouse drags.
                         </p>
                       </div>
 
@@ -3867,70 +4095,17 @@ export default function TrackingCanvas() {
                               }
                               className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
                             >
-                              <option value="swedish">Swedish Flag</option>
-                              <option value="youtube">YouTube Logo</option>
                               <option value="rainbow">Spectrum Gradient</option>
                               <option value="flowers">Concentric Flowers</option>
-                              <option value="text">Custom Text</option>
-                              <option value="custom">Custom Image Upload</option>
                               <option value="spiral">Spiral Helix (Feathered POV)</option>
                               <option value="chevron">Chevron Zigzag (Geometric)</option>
                               <option value="mandala">Concentric Mandala (Rings)</option>
+                              <option value="plasma">Plasma Field (Organic)</option>
+                              <option value="starburst">Starburst Rays (Radial)</option>
+                              <option value="plaid">Plaid Weave (Tartan)</option>
+                              <option value="wave">Layered Waves (Aurora)</option>
                             </select>
                           </div>
-
-                          {settings.poiPatternType === 'text' && (
-                            <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] text-neutral-400">Text Content</span>
-                                <input
-                                  type="text"
-                                  value={settings.poiText}
-                                  onChange={(e) =>
-                                    setSettings((prev) => ({ ...prev, poiText: e.target.value.toUpperCase() }))
-                                  }
-                                  className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-blue-500"
-                                  placeholder="ENTER TEXT"
-                                />
-                              </div>
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] text-neutral-400">Text Color</span>
-                                <div className="flex gap-2 mt-1">
-                                  {['#ff2a85', '#00ffcc', '#ffe600', '#3b82f6', '#ffffff'].map((color) => (
-                                    <button
-                                      key={color}
-                                      onClick={() => setSettings((prev) => ({ ...prev, poiTextColor: color }))}
-                                      className={`w-5 h-5 rounded-full border cursor-pointer transition-all ${
-                                        settings.poiTextColor === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
-                                      }`}
-                                      style={{ backgroundColor: color }}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {settings.poiPatternType === 'custom' && (
-                            <div className="flex flex-col gap-1.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                              <span className="text-[10px] text-neutral-400">Upload Image File</span>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    const reader = new FileReader();
-                                    reader.onload = (event) => {
-                                      setSettings((prev) => ({ ...prev, poiCustomImage: event.target?.result as string }));
-                                    };
-                                    reader.readAsDataURL(file);
-                                  }
-                                }}
-                                className="w-full text-xs text-neutral-400 file:mr-4 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-neutral-800 file:text-white hover:file:bg-neutral-700 cursor-pointer"
-                              />
-                            </div>
-                          )}
                            <div className="flex flex-col gap-1.5">
                             <span className="text-xs text-neutral-400">Effect Orientation</span>
                             <select
