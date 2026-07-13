@@ -473,44 +473,45 @@ type SettingDisplayMeta = {
   max?: number;
   unit?: string;
   condition?: (settings: TrackingSettings) => boolean;
+  tab?: 'presets' | 'trails' | 'poi' | 'camera' | 'paint';
 };
 
 const ACTIVE_EFFECTS_META: SettingDisplayMeta[] = [
   // Toggles
-  { key: 'enableTrails', label: 'Motion Trails', type: 'boolean' },
-  { key: 'enableLightTracking', label: 'Light Tracking', type: 'boolean', condition: s => s.enableTrails },
-  { key: 'enablePoiMode', label: 'Pixel Mode', type: 'boolean', condition: s => s.enableTrails },
-  { key: 'stampEnabled', label: 'Stamp Overlay', type: 'boolean' },
+  { key: 'enableTrails', label: 'Motion Trails', type: 'boolean', tab: 'trails' },
+  { key: 'enableLightTracking', label: 'Light Tracking', type: 'boolean', condition: s => s.enableTrails, tab: 'trails' },
+  { key: 'enablePoiMode', label: 'Pixel Mode', type: 'boolean', condition: s => s.enableTrails, tab: 'poi' },
+  { key: 'stampEnabled', label: 'Stamp Overlay', type: 'boolean', tab: 'paint' },
 
   // Trails Settings
-  { key: 'motionThreshold', label: 'Motion Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && !s.enableLightTracking },
-  { key: 'lightThreshold', label: 'Light Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && s.enableLightTracking },
-  { key: 'echoFadeRate', label: 'Trail Fade Rate', type: 'slider', min: 0.01, max: 0.5, unit: '', condition: s => s.enableTrails && !s.enablePoiMode },
-  { key: 'blurAmount', label: 'Blur Amount', type: 'slider', min: 0, max: 50, unit: 'px', condition: s => s.enableTrails && s.blurAmount > 0 },
-  { key: 'feedbackZoom', label: 'Feedback Zoom', type: 'slider', min: 0.8, max: 1.2, unit: 'x', condition: s => s.enableTrails && s.feedbackZoom !== 1.0 },
-  { key: 'hueRotate', label: 'Hue Rotation', type: 'slider', min: 0, max: 360, unit: '°', condition: s => s.enableTrails && s.hueRotate !== 0 },
-  { key: 'colorCycleSpeed', label: 'Color Cycle Speed', type: 'slider', min: 0, max: 10, unit: '', condition: s => s.enableTrails && s.colorCycleSpeed !== 0 },
-  { key: 'verticalDrift', label: 'Vertical Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.verticalDrift !== 0 },
-  { key: 'horizontalDrift', label: 'Horizontal Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.horizontalDrift !== 0 },
-  { key: 'strobeRate', label: 'Strobe Rate', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.strobeRate > 0 },
-  { key: 'motionBlur', label: 'Motion Blur', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.motionBlur > 0 },
+  { key: 'motionThreshold', label: 'Motion Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && !s.enableLightTracking, tab: 'trails' },
+  { key: 'lightThreshold', label: 'Light Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && s.enableLightTracking, tab: 'trails' },
+  { key: 'echoFadeRate', label: 'Trail Fade Rate', type: 'slider', min: 0.01, max: 0.5, unit: '', condition: s => s.enableTrails && !s.enablePoiMode, tab: 'trails' },
+  { key: 'blurAmount', label: 'Blur Amount', type: 'slider', min: 0, max: 50, unit: 'px', condition: s => s.enableTrails && s.blurAmount > 0, tab: 'trails' },
+  { key: 'feedbackZoom', label: 'Feedback Zoom', type: 'slider', min: 0.8, max: 1.2, unit: 'x', condition: s => s.enableTrails && s.feedbackZoom !== 1.0, tab: 'trails' },
+  { key: 'hueRotate', label: 'Hue Rotation', type: 'slider', min: 0, max: 360, unit: '°', condition: s => s.enableTrails && s.hueRotate !== 0, tab: 'trails' },
+  { key: 'colorCycleSpeed', label: 'Color Cycle Speed', type: 'slider', min: 0, max: 10, unit: '', condition: s => s.enableTrails && s.colorCycleSpeed !== 0, tab: 'trails' },
+  { key: 'verticalDrift', label: 'Vertical Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.verticalDrift !== 0, tab: 'trails' },
+  { key: 'horizontalDrift', label: 'Horizontal Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.horizontalDrift !== 0, tab: 'trails' },
+  { key: 'strobeRate', label: 'Strobe Rate', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.strobeRate > 0, tab: 'trails' },
+  { key: 'motionBlur', label: 'Motion Blur', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.motionBlur > 0, tab: 'trails' },
 
   // Pixel POI Settings
-  { key: 'poiPatternType', label: 'Pattern Source', type: 'select', condition: s => s.enableTrails && s.enablePoiMode },
-  { key: 'poiOrientation', label: 'Effect Orientation', type: 'select', condition: s => s.enableTrails && s.enablePoiMode },
-  { key: 'poiPovRetention', label: 'Trail Retention', type: 'slider', min: 50, max: 2000, unit: 'ms', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled },
-  { key: 'poiPovColumnSpacing', label: 'Column Spacing', type: 'slider', min: 1, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled },
-  { key: 'poiGlowEnabled', label: 'POI Glow', type: 'boolean', condition: s => s.enableTrails && s.enablePoiMode },
-  { key: 'poiGlowRadius', label: 'Glow Radius', type: 'slider', min: 2, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled },
-  { key: 'poiGlowIntensity', label: 'Glow Intensity', type: 'slider', min: 0.1, max: 1.0, unit: '', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled },
+  { key: 'poiPatternType', label: 'Pattern Source', type: 'select', condition: s => s.enableTrails && s.enablePoiMode, tab: 'poi' },
+  { key: 'poiOrientation', label: 'Effect Orientation', type: 'select', condition: s => s.enableTrails && s.enablePoiMode, tab: 'poi' },
+  { key: 'poiPovRetention', label: 'Trail Retention', type: 'slider', min: 50, max: 2000, unit: 'ms', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled, tab: 'poi' },
+  { key: 'poiPovColumnSpacing', label: 'Column Spacing', type: 'slider', min: 1, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled, tab: 'poi' },
+  { key: 'poiGlowEnabled', label: 'POI Glow', type: 'boolean', condition: s => s.enableTrails && s.enablePoiMode, tab: 'poi' },
+  { key: 'poiGlowRadius', label: 'Glow Radius', type: 'slider', min: 2, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled, tab: 'poi' },
+  { key: 'poiGlowIntensity', label: 'Glow Intensity', type: 'slider', min: 0.1, max: 1.0, unit: '', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled, tab: 'poi' },
 
   // Stamp Overlay Settings
-  { key: 'stampSource', label: 'Stamp Source', type: 'select', condition: s => s.stampEnabled },
-  { key: 'stampRevealRadius', label: 'Reveal Radius', type: 'slider', min: 15, max: 200, unit: 'px', condition: s => s.stampEnabled },
-  { key: 'stampRevealStrength', label: 'Reveal Strength', type: 'slider', min: 0.02, max: 0.5, unit: '', condition: s => s.stampEnabled },
-  { key: 'stampMaxOpacity', label: 'Max Opacity', type: 'slider', min: 0.1, max: 0.95, unit: '', condition: s => s.stampEnabled },
-  { key: 'stampFadeDelay', label: 'Fade Delay', type: 'slider', min: 0, max: 3000, unit: 'ms', condition: s => s.stampEnabled },
-  { key: 'stampScale', label: 'Stamp Scale', type: 'slider', min: 0.3, max: 3.0, unit: 'x', condition: s => s.stampEnabled },
+  { key: 'stampSource', label: 'Stamp Source', type: 'select', condition: s => s.stampEnabled, tab: 'paint' },
+  { key: 'stampRevealRadius', label: 'Reveal Radius', type: 'slider', min: 15, max: 200, unit: 'px', condition: s => s.stampEnabled, tab: 'paint' },
+  { key: 'stampRevealStrength', label: 'Reveal Strength', type: 'slider', min: 0.02, max: 0.5, unit: '', condition: s => s.stampEnabled, tab: 'paint' },
+  { key: 'stampMaxOpacity', label: 'Max Opacity', type: 'slider', min: 0.1, max: 0.95, unit: '', condition: s => s.stampEnabled, tab: 'paint' },
+  { key: 'stampFadeDelay', label: 'Fade Delay', type: 'slider', min: 0, max: 3000, unit: 'ms', condition: s => s.stampEnabled, tab: 'paint' },
+  { key: 'stampScale', label: 'Stamp Scale', type: 'slider', min: 0.3, max: 3.0, unit: 'x', condition: s => s.stampEnabled, tab: 'paint' },
 ];
 
 export default function TrackingCanvas() {
@@ -642,6 +643,47 @@ export default function TrackingCanvas() {
   const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
   const [geminiCollapsed, setGeminiCollapsed] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'presets' | 'trails' | 'poi' | 'camera' | 'paint'>('presets');
+  const [highlightedSettingKey, setHighlightedSettingKey] = useState<string | null>(null);
+
+  const handleActiveEffectClick = useCallback((meta: SettingDisplayMeta) => {
+    if (meta.tab) {
+      setActiveTab(meta.tab);
+    }
+    setIsSidebarOpen(true);
+    setHighlightedSettingKey(meta.key);
+
+    setTimeout(() => {
+      const sidebar = document.getElementById('settings-sidebar');
+      if (!sidebar) return;
+
+      const walker = document.createTreeWalker(sidebar, NodeFilter.SHOW_TEXT, null);
+      let node;
+      let targetElement: HTMLElement | null = null;
+      while ((node = walker.nextNode())) {
+        if (node.nodeValue?.trim().toLowerCase().includes(meta.label.toLowerCase()) || (meta.label === 'Light Tracking' && node.nodeValue?.trim().toLowerCase().includes('light filter'))) {
+          targetElement = node.parentElement;
+          break;
+        }
+      }
+
+      if (targetElement) {
+        const container = targetElement.closest('.flex.flex-col.gap-2\\.5') || targetElement.closest('.flex.flex-col.gap-3') || targetElement.closest('.flex.flex-col.gap-2') || targetElement.closest('.flex.items-center.justify-between') || targetElement;
+        if (container && container instanceof HTMLElement) {
+          container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          container.classList.add('ring-2', 'ring-blue-500', 'bg-blue-500/10', 'transition-all', 'duration-500', 'rounded-lg', 'scale-[1.02]');
+          
+          setTimeout(() => {
+            container.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-500/10', 'scale-[1.02]');
+          }, 6000);
+        }
+      }
+    }, 150);
+
+    setTimeout(() => {
+      setHighlightedSettingKey(null);
+    }, 6000);
+  }, []);
 
   const hasEnvApiKey = !!(import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY);
 
@@ -2899,22 +2941,22 @@ export default function TrackingCanvas() {
                         
                         if (meta.type === 'boolean') {
                           return (
-                            <div key={meta.key} className="flex items-center gap-2 text-emerald-400">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]" />
-                              <span className="font-semibold">{meta.label}</span>
-                              <span className="text-neutral-400 ml-auto pl-4">ON</span>
+                            <div key={meta.key} onClick={() => handleActiveEffectClick(meta)} className="flex items-center gap-2 text-emerald-400 cursor-pointer hover:bg-neutral-800/50 p-1 -mx-1 rounded transition-colors group">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)] group-hover:scale-125 transition-transform" />
+                              <span className="font-semibold group-hover:text-emerald-300 transition-colors">{meta.label}</span>
+                              <span className="text-neutral-400 ml-auto pl-4 group-hover:text-neutral-300 transition-colors">ON</span>
                             </div>
                           );
                         }
                         
                         if (meta.type === 'select') {
                           return (
-                            <div key={meta.key} className="flex flex-col gap-0.5 text-blue-300">
+                            <div key={meta.key} onClick={() => handleActiveEffectClick(meta)} className="flex flex-col gap-0.5 text-blue-300 cursor-pointer hover:bg-neutral-800/50 p-1 -mx-1 rounded transition-colors group">
                               <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.5)]" />
-                                <span className="font-semibold">{meta.label}</span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.5)] group-hover:scale-125 transition-transform" />
+                                <span className="font-semibold group-hover:text-blue-200 transition-colors">{meta.label}</span>
                               </div>
-                              <div className="pl-3 text-neutral-200 font-bold uppercase">{String(val)}</div>
+                              <div className="pl-3 text-neutral-200 font-bold uppercase group-hover:text-white transition-colors">{String(val)}</div>
                             </div>
                           );
                         }
@@ -2923,15 +2965,15 @@ export default function TrackingCanvas() {
                         const numVal = Number(val);
                         const isInt = Number.isInteger(meta.min) && Number.isInteger(meta.max);
                         return (
-                          <div key={meta.key} className="flex flex-col gap-0.5 text-amber-300">
+                          <div key={meta.key} onClick={() => handleActiveEffectClick(meta)} className="flex flex-col gap-0.5 text-amber-300 cursor-pointer hover:bg-neutral-800/50 p-1 -mx-1 rounded transition-colors group">
                             <div className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.5)]" />
-                              <span className="font-semibold">{meta.label}</span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.5)] group-hover:scale-125 transition-transform" />
+                              <span className="font-semibold group-hover:text-amber-200 transition-colors">{meta.label}</span>
                             </div>
                             <div className="flex flex-col pl-3">
                               <div className="flex items-center gap-1.5 text-[9px] font-medium tracking-wide text-neutral-400 mt-0.5">
                                 <span>Min: {meta.min}{meta.unit}</span>
-                                <span className="text-neutral-100 border-b border-neutral-600/50 pb-0.5 text-[10px] font-medium font-bold">Current: {isInt ? numVal.toFixed(0) : numVal.toFixed(2).replace(/\.00$/, '')}{meta.unit}</span>
+                                <span className="text-neutral-100 border-b border-neutral-600/50 pb-0.5 text-[10px] font-bold group-hover:text-white transition-colors group-hover:border-neutral-500">Current: {isInt ? numVal.toFixed(0) : numVal.toFixed(2).replace(/\.00$/, '')}{meta.unit}</span>
                                 <span>Max: {meta.max}{meta.unit}</span>
                               </div>
                             </div>
@@ -3377,6 +3419,7 @@ export default function TrackingCanvas() {
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.2 }}
             className="absolute right-0 top-10 bottom-0 w-full sm:w-80 bg-[#0a0a0a]/95 backdrop-blur-2xl border-l border-neutral-800 z-30 flex flex-col shadow-2xl"
+            id="settings-sidebar"
           >
             {/* Sidebar Header with Close Button */}
             <div className="flex items-center justify-between border-b border-neutral-800 p-4 pb-3 shrink-0">
