@@ -64,6 +64,17 @@ export const DEFAULT_TRACKING_SETTINGS: TrackingSettings = {
   poiGlowRadius: 6,
   poiGlowIntensity: 0.5,
   poiLedCount: 0,
+  // === STAMP OVERLAY DEFAULTS ===
+  stampEnabled: false,
+  stampSource: 'text',
+  stampRevealRadius: 60,
+  stampRevealStrength: 0.15,
+  stampMaxOpacity: 0.65,
+  stampFadeDelay: 500,
+  stampFadeRate: 0.02,
+  stampX: 0.5,
+  stampY: 0.5,
+  stampScale: 1.0,
 };
 
 export interface QuickPreset {

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, MouseEvent } from 'react';
+import React, { useRef, useEffect, useState, MouseEvent, useMemo } from 'react';
 import {
   Camera,
   Play,
@@ -465,6 +465,53 @@ function updatePoiPattern(
     ctx.globalAlpha = 1.0;
   }
 }
+type SettingDisplayMeta = {
+  key: keyof TrackingSettings;
+  label: string;
+  type: 'slider' | 'boolean' | 'select';
+  min?: number;
+  max?: number;
+  unit?: string;
+  condition?: (settings: TrackingSettings) => boolean;
+};
+
+const ACTIVE_EFFECTS_META: SettingDisplayMeta[] = [
+  // Toggles
+  { key: 'enableTrails', label: 'Motion Trails', type: 'boolean' },
+  { key: 'enableLightTracking', label: 'Light Tracking', type: 'boolean', condition: s => s.enableTrails },
+  { key: 'enablePoiMode', label: 'Pixel Mode', type: 'boolean', condition: s => s.enableTrails },
+  { key: 'stampEnabled', label: 'Stamp Overlay', type: 'boolean' },
+
+  // Trails Settings
+  { key: 'motionThreshold', label: 'Motion Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && !s.enableLightTracking },
+  { key: 'lightThreshold', label: 'Light Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && s.enableLightTracking },
+  { key: 'echoFadeRate', label: 'Trail Fade Rate', type: 'slider', min: 0.01, max: 0.5, unit: '', condition: s => s.enableTrails && !s.enablePoiMode },
+  { key: 'blurAmount', label: 'Blur Amount', type: 'slider', min: 0, max: 50, unit: 'px', condition: s => s.enableTrails && s.blurAmount > 0 },
+  { key: 'feedbackZoom', label: 'Feedback Zoom', type: 'slider', min: 0.8, max: 1.2, unit: 'x', condition: s => s.enableTrails && s.feedbackZoom !== 1.0 },
+  { key: 'hueRotate', label: 'Hue Rotation', type: 'slider', min: 0, max: 360, unit: '°', condition: s => s.enableTrails && s.hueRotate !== 0 },
+  { key: 'colorCycleSpeed', label: 'Color Cycle Speed', type: 'slider', min: 0, max: 10, unit: '', condition: s => s.enableTrails && s.colorCycleSpeed !== 0 },
+  { key: 'verticalDrift', label: 'Vertical Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.verticalDrift !== 0 },
+  { key: 'horizontalDrift', label: 'Horizontal Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.horizontalDrift !== 0 },
+  { key: 'strobeRate', label: 'Strobe Rate', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.strobeRate > 0 },
+  { key: 'motionBlur', label: 'Motion Blur', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.motionBlur > 0 },
+
+  // Pixel POI Settings
+  { key: 'poiPatternType', label: 'Pattern Source', type: 'select', condition: s => s.enableTrails && s.enablePoiMode },
+  { key: 'poiOrientation', label: 'Effect Orientation', type: 'select', condition: s => s.enableTrails && s.enablePoiMode },
+  { key: 'poiPovRetention', label: 'Trail Retention', type: 'slider', min: 50, max: 2000, unit: 'ms', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled },
+  { key: 'poiPovColumnSpacing', label: 'Column Spacing', type: 'slider', min: 1, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiPovEnabled },
+  { key: 'poiGlowEnabled', label: 'POI Glow', type: 'boolean', condition: s => s.enableTrails && s.enablePoiMode },
+  { key: 'poiGlowRadius', label: 'Glow Radius', type: 'slider', min: 2, max: 20, unit: 'px', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled },
+  { key: 'poiGlowIntensity', label: 'Glow Intensity', type: 'slider', min: 0.1, max: 1.0, unit: '', condition: s => s.enableTrails && s.enablePoiMode && s.poiGlowEnabled },
+
+  // Stamp Overlay Settings
+  { key: 'stampSource', label: 'Stamp Source', type: 'select', condition: s => s.stampEnabled },
+  { key: 'stampRevealRadius', label: 'Reveal Radius', type: 'slider', min: 15, max: 200, unit: 'px', condition: s => s.stampEnabled },
+  { key: 'stampRevealStrength', label: 'Reveal Strength', type: 'slider', min: 0.02, max: 0.5, unit: '', condition: s => s.stampEnabled },
+  { key: 'stampMaxOpacity', label: 'Max Opacity', type: 'slider', min: 0.1, max: 0.95, unit: '', condition: s => s.stampEnabled },
+  { key: 'stampFadeDelay', label: 'Fade Delay', type: 'slider', min: 0, max: 3000, unit: 'ms', condition: s => s.stampEnabled },
+  { key: 'stampScale', label: 'Stamp Scale', type: 'slider', min: 0.3, max: 3.0, unit: 'x', condition: s => s.stampEnabled },
+];
 
 export default function TrackingCanvas() {
   // Elements
@@ -552,6 +599,15 @@ export default function TrackingCanvas() {
     }
     return DEFAULT_TRACKING_SETTINGS;
   });
+
+  // Derived state for Active Effects HUD
+  const activeEffectsList = useMemo(() => {
+    return ACTIVE_EFFECTS_META.filter(meta => {
+      if (meta.condition && !meta.condition(settings)) return false;
+      if (meta.type === 'boolean' && !settings[meta.key as keyof TrackingSettings]) return false;
+      return true;
+    });
+  }, [settings]);
 
   useEffect(() => {
     try {
@@ -2608,35 +2664,35 @@ export default function TrackingCanvas() {
     switch (key) {
       case 'echoFadeRate': {
         const p = 1 - settings.echoFadeRate;
-        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (p < 0.05) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'text-cyan-400 bg-cyan-950/20 border-cyan-800/60 shadow-[0_0_12px_rgba(34,211,238,0.25)]';
       }
       case 'motionThreshold': {
         const val = 135 - settings.motionThreshold;
         const p = (val - 15) / 105;
-        if (p < 0.1) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (p < 0.1) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'text-emerald-400 bg-emerald-950/20 border-emerald-805/60 shadow-[0_0_12px_rgba(52,211,153,0.25)]';
       }
       case 'blurAmount': {
         const p = settings.blurAmount / 20;
-        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (p < 0.05) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'text-purple-400 bg-purple-950/20 border-purple-800/60 shadow-[0_0_12px_rgba(192,132,252,0.25)]';
       }
       case 'hueRotate': {
-        if (settings.hueRotate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (settings.hueRotate === 0) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'bg-neutral-950/40 border-neutral-700/60 shadow-[0_0_12px_rgba(255,255,255,0.15)]';
       }
       case 'feedbackZoom': {
         const p = Math.abs(settings.feedbackZoom - 1.0) / 0.1;
-        if (p < 0.05) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (p < 0.05) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'text-amber-400 bg-amber-950/20 border-amber-800/60 shadow-[0_0_12px_rgba(251,191,36,0.25)]';
       }
       case 'strobeRate': {
-        if (settings.strobeRate === 0) return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        if (settings.strobeRate === 0) return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
         return 'text-rose-400 bg-rose-950/20 border-rose-800/60 shadow-[0_0_12px_rgba(251,113,133,0.25)]';
       }
       default:
-        return 'text-neutral-500 bg-neutral-900/50 border-neutral-800';
+        return 'text-neutral-300 bg-neutral-900/50 border-neutral-800';
     }
   };
 
@@ -2701,10 +2757,10 @@ export default function TrackingCanvas() {
                 )}
               </div>
               <div>
-                <h3 className="font-sans font-semibold text-lg text-neutral-200">
+                <h3 className="font-sans font-semibold text-lg text-white">
                   Ready to Start Juggling
                 </h3>
-                <p className="text-sm text-neutral-400 mt-1">
+                <p className="text-sm text-neutral-200 mt-1">
                   Connect your webcam or upload a video to unlock trailing and trajectory mapping.
                 </p>
               </div>
@@ -2715,7 +2771,7 @@ export default function TrackingCanvas() {
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'camera'
                       ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
+                      : 'text-neutral-300 hover:text-neutral-100 border border-transparent'
                   }`}
                 >
                   Live Camera
@@ -2725,7 +2781,7 @@ export default function TrackingCanvas() {
                   className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                     videoSourceMode === 'file'
                       ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
+                      : 'text-neutral-300 hover:text-neutral-100 border border-transparent'
                   }`}
                 >
                   Upload Video
@@ -2738,7 +2794,7 @@ export default function TrackingCanvas() {
                     <select
                       value={selectedDeviceId}
                       onChange={(e) => setSelectedDeviceId(e.target.value)}
-                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
+                      className="w-full bg-neutral-800 text-sm text-white border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
                     >
                       {devices.map((device) => (
                         <option key={device.deviceId} value={device.deviceId}>
@@ -2763,13 +2819,13 @@ export default function TrackingCanvas() {
               ) : (
                 <div className="w-full flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
-                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Quick Test</span>
+                    <span className="text-[10px] font-medium uppercase font-mono tracking-wider text-neutral-300">Quick Test</span>
                     <button
                       onClick={loadDemoVideo}
                       className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-2 border ${
                         isDemoSelected 
                           ? 'bg-blue-500/15 text-blue-400 border-blue-500/40 shadow-sm shadow-blue-500/5' 
-                          : 'bg-neutral-800/60 text-neutral-300 border-neutral-700/50 hover:bg-neutral-800 hover:text-white'
+                          : 'bg-neutral-800/60 text-neutral-100 border-neutral-700/50 hover:bg-neutral-800 hover:text-white'
                       }`}
                     >
                       <Play className="w-3.5 h-3.5" />
@@ -2779,17 +2835,17 @@ export default function TrackingCanvas() {
 
                   <div className="relative flex py-1 items-center justify-center">
                     <div className="flex-grow border-t border-neutral-800/60"></div>
-                    <span className="flex-shrink mx-3 text-[10px] text-neutral-500 font-mono tracking-widest">OR</span>
+                    <span className="flex-shrink mx-3 text-[10px] font-medium text-neutral-300 font-mono tracking-widest">OR</span>
                     <div className="flex-grow border-t border-neutral-800/60"></div>
                   </div>
 
                   <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
-                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Upload Your Own</span>
+                    <span className="text-[10px] font-medium uppercase font-mono tracking-wider text-neutral-300">Upload Your Own</span>
                     <input 
                       type="file" 
                       accept="video/*" 
                       onChange={handleFileSelected} 
-                      className="w-full text-xs text-neutral-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-neutral-800 file:text-neutral-300 hover:file:bg-neutral-700 hover:file:text-white file:cursor-pointer cursor-pointer"
+                      className="w-full text-xs text-neutral-200 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-neutral-800 file:text-neutral-100 hover:file:bg-neutral-700 hover:file:text-white file:cursor-pointer cursor-pointer"
                     />
                   </div>
 
@@ -2809,30 +2865,81 @@ export default function TrackingCanvas() {
           {cameraActive && (
             <>
               {/* Top status bar */}
-              <div className={`absolute top-14 left-4 right-4 flex items-center justify-between pointer-events-none z-20 transition-all duration-300 ${isSidebarOpen ? 'lg:pr-[340px]' : ''}`}>
+              <div className={`absolute top-14 left-4 right-4 flex items-start justify-between pointer-events-none z-20 transition-all duration-300 ${isSidebarOpen ? 'lg:pr-[340px]' : ''}`}>
                 <div className="flex flex-col gap-1.5 pointer-events-auto">
                   <div className="bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800 flex items-center gap-2 w-fit">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span className="text-xs font-mono font-medium text-neutral-300">LIVE</span>
-                    <span className="text-xs text-neutral-500">|</span>
+                    <span className="text-xs font-mono font-medium text-neutral-100">LIVE</span>
+                    <span className="text-xs text-neutral-300">|</span>
                     <span className="text-xs font-mono text-blue-400">{fps} FPS</span>
                   </div>
 
                   {/* Active Export Settings HUD */}
-                  <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-800/80 flex flex-col gap-1 text-[9px] font-mono text-neutral-400 w-fit">
+                  <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-800/80 flex flex-col gap-1 text-[10px] font-medium font-mono text-neutral-200 w-fit">
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                      <span>Format: <span className="text-neutral-200 uppercase">{settings.exportMimeType ? (supportedMimeTypes.find(t => t.mimeType === settings.exportMimeType)?.ext || 'webm') : 'webm'}</span></span>
+                      <span>Format: <span className="text-white uppercase">{settings.exportMimeType ? (supportedMimeTypes.find(t => t.mimeType === settings.exportMimeType)?.ext || 'webm') : 'webm'}</span></span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                      <span>FPS: <span className="text-neutral-200">{settings.exportFps} FPS</span></span>
+                      <span>FPS: <span className="text-white">{settings.exportFps} FPS</span></span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                      <span>Quality: <span className="text-neutral-200 capitalize">{settings.exportQuality} ({settings.exportQuality === 'ultra' ? '30M' : settings.exportQuality === 'high' ? '15M' : settings.exportQuality === 'medium' ? '8M' : '4M'}bps)</span></span>
+                      <span>Quality: <span className="text-white capitalize">{settings.exportQuality} ({settings.exportQuality === 'ultra' ? '30M' : settings.exportQuality === 'high' ? '15M' : settings.exportQuality === 'medium' ? '8M' : '4M'}bps)</span></span>
                     </div>
                   </div>
+
+                  {/* Active Effects List */}
+                  {activeEffectsList.length > 0 && (
+                    <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2.5 rounded-lg border border-neutral-800/80 flex flex-col gap-2.5 text-[9px] font-medium font-mono w-fit max-h-[60vh] overflow-y-auto mt-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-transparent">
+                      <div className="text-neutral-300 font-bold border-b border-neutral-700/60 pb-1.5 uppercase tracking-wider">Active Settings</div>
+                      {activeEffectsList.map(meta => {
+                        const val = settings[meta.key as keyof TrackingSettings];
+                        
+                        if (meta.type === 'boolean') {
+                          return (
+                            <div key={meta.key} className="flex items-center gap-2 text-emerald-400">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]" />
+                              <span className="font-semibold">{meta.label}</span>
+                              <span className="text-neutral-400 ml-auto pl-4">ON</span>
+                            </div>
+                          );
+                        }
+                        
+                        if (meta.type === 'select') {
+                          return (
+                            <div key={meta.key} className="flex flex-col gap-0.5 text-blue-300">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.5)]" />
+                                <span className="font-semibold">{meta.label}</span>
+                              </div>
+                              <div className="pl-3 text-neutral-200 font-bold uppercase">{String(val)}</div>
+                            </div>
+                          );
+                        }
+                        
+                        // slider
+                        const numVal = Number(val);
+                        const isInt = Number.isInteger(meta.min) && Number.isInteger(meta.max);
+                        return (
+                          <div key={meta.key} className="flex flex-col gap-0.5 text-amber-300">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.5)]" />
+                              <span className="font-semibold">{meta.label}</span>
+                            </div>
+                            <div className="flex flex-col pl-3">
+                              <div className="flex items-center gap-1.5 text-[9px] font-medium tracking-wide text-neutral-400 mt-0.5">
+                                <span>Min: {meta.min}{meta.unit}</span>
+                                <span className="text-neutral-100 border-b border-neutral-600/50 pb-0.5 text-[10px] font-medium font-bold">Current: {isInt ? numVal.toFixed(0) : numVal.toFixed(2).replace(/\.00$/, '')}{meta.unit}</span>
+                                <span>Max: {meta.max}{meta.unit}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 pointer-events-auto">
@@ -2842,7 +2949,7 @@ export default function TrackingCanvas() {
                     className={`border p-2 rounded-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
                       isSidebarOpen 
                         ? 'bg-blue-600 border-blue-500 text-white' 
-                        : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                        : 'bg-neutral-900 border-neutral-800 text-neutral-100 hover:bg-neutral-800'
                     }`}
                     title={isSidebarOpen ? 'Hide Settings' : 'Show Settings'}
                   >
@@ -2853,7 +2960,7 @@ export default function TrackingCanvas() {
                   {/* Full screen toggle */}
                   <button
                     onClick={toggleFullscreen}
-                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-300 p-2 rounded-lg transition-all active:scale-95 cursor-pointer"
+                    className="bg-neutral-900 border border-neutral-800 hover:bg-neutral-900 text-neutral-100 p-2 rounded-lg transition-all active:scale-95 cursor-pointer"
                     title={isFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'}
                   >
                     {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -2876,14 +2983,14 @@ export default function TrackingCanvas() {
                     {/* Play/Pause Button */}
                     <button
                       onClick={handleTogglePlay}
-                      className="p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+                      className="p-2 rounded-lg text-neutral-100 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
                       title={isPaused ? "Play" : "Pause"}
                     >
                       {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
                     </button>
 
                     {/* Time Display */}
-                    <span className="text-[11px] font-mono text-neutral-400 select-none shrink-0">
+                    <span className="text-[11px] font-mono text-neutral-200 select-none shrink-0">
                       {formatTime(currentTime)} / {formatTime(duration)}
                     </span>
 
@@ -2905,7 +3012,7 @@ export default function TrackingCanvas() {
                     {/* Clear Trails Button */}
                     <button
                       onClick={handleClearTrails}
-                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 px-2.5 py-1 rounded text-[11px] font-medium transition-all active:scale-95 border border-neutral-750 flex items-center gap-1.5 cursor-pointer shrink-0"
+                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-100 px-2.5 py-1 rounded text-[11px] font-medium transition-all active:scale-95 border border-neutral-750 flex items-center gap-1.5 cursor-pointer shrink-0"
                       title="Clear existing trails"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -2945,7 +3052,7 @@ export default function TrackingCanvas() {
                     </button>
                     <button
                       onClick={() => setShowExportModal(true)}
-                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
+                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-100 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
                       title="Adjust Export Quality Settings"
                     >
                       <Sliders className="w-3.5 h-3.5" />
@@ -2970,10 +3077,10 @@ export default function TrackingCanvas() {
             <Info className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-sans font-medium text-sm text-neutral-200">
+            <h4 className="font-sans font-medium text-sm text-white">
               Calibration & Setup Guide
             </h4>
-            <p className="text-xs text-neutral-400 leading-relaxed mt-1">
+            <p className="text-xs text-neutral-200 leading-relaxed mt-1">
               {settings.trackingMode === 'color' 
                 ? "Select a neon ball preset on the right, or click directly on any juggling ball in the camera view to track its custom color. For best results, use bright balls on a contrasting background."
                 : "Motion detection tracks any moving object regardless of color. For best results, ensure your camera is completely stable and you're juggling against a solid background."}
@@ -3000,13 +3107,13 @@ export default function TrackingCanvas() {
                 <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Sliders className="w-4 h-4 text-blue-400" />
-                    <h3 className="font-semibold text-sm text-neutral-200">
+                    <h3 className="font-semibold text-sm text-white">
                       Configure Export Quality
                     </h3>
                   </div>
                   <button
                     onClick={() => setShowExportModal(false)}
-                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                    className="text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
                   >
                     Cancel
                   </button>
@@ -3016,8 +3123,8 @@ export default function TrackingCanvas() {
                   {/* Export Framerate */}
                   <div className="flex flex-col gap-1.5">
                     <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
-                      <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
+                      <span className="text-xs text-neutral-200 font-medium">Export Framerate</span>
+                      <span className="text-[10px] font-medium text-neutral-300">60 FPS is smoother; 30 FPS has higher compatibility.</span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-1">
                       {[30, 60].map((fpsVal) => (
@@ -3028,7 +3135,7 @@ export default function TrackingCanvas() {
                           className={`py-2 rounded-lg text-xs font-mono font-medium transition-all ${
                             settings.exportFps === fpsVal
                               ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
-                              : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
+                              : 'bg-neutral-800 text-neutral-200 border border-neutral-700/50 hover:bg-neutral-750'
                           }`}
                         >
                           {fpsVal} FPS
@@ -3040,8 +3147,8 @@ export default function TrackingCanvas() {
                   {/* Export Quality / Bitrate */}
                   <div className="flex flex-col gap-1.5">
                     <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
-                      <span className="text-[10px] text-neutral-500">Higher bitrates prevent pixelation in high motion.</span>
+                      <span className="text-xs text-neutral-200 font-medium">Export Quality (Bitrate)</span>
+                      <span className="text-[10px] font-medium text-neutral-300">Higher bitrates prevent pixelation in high motion.</span>
                     </div>
                     <select
                       value={settings.exportQuality}
@@ -3051,7 +3158,7 @@ export default function TrackingCanvas() {
                           exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
                         }))
                       }
-                      className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                      className="w-full bg-neutral-850 text-xs text-white border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
                     >
                       <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
                       <option value="high">High (15 Mbps - Premium/Clear)</option>
@@ -3063,8 +3170,8 @@ export default function TrackingCanvas() {
                   {/* Container & Codec format */}
                   <div className="flex flex-col gap-1.5">
                     <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
-                      <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
+                      <span className="text-xs text-neutral-200 font-medium">Container & Codec</span>
+                      <span className="text-[10px] font-medium text-neutral-300">Detected formats supported by your browser.</span>
                     </div>
                     {supportedMimeTypes.length > 0 ? (
                       <select
@@ -3072,7 +3179,7 @@ export default function TrackingCanvas() {
                         onChange={(e) =>
                           setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
                         }
-                        className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
+                        className="w-full bg-neutral-850 text-xs text-white border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
                       >
                         {supportedMimeTypes.map((t) => (
                           <option key={t.mimeType} value={t.mimeType}>
@@ -3081,7 +3188,7 @@ export default function TrackingCanvas() {
                         ))}
                       </select>
                     ) : (
-                      <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
+                      <div className="text-[10px] font-medium text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
                         No supported recording codecs detected.
                       </div>
                     )}
@@ -3094,7 +3201,7 @@ export default function TrackingCanvas() {
                       setExportConfigured(true);
                       setShowExportModal(false);
                     }}
-                    className="flex-1 bg-neutral-800 hover:bg-neutral-750 text-neutral-300 py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98]"
+                    className="flex-1 bg-neutral-800 hover:bg-neutral-750 text-neutral-100 py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98]"
                   >
                     Save Settings
                   </button>
@@ -3126,13 +3233,13 @@ export default function TrackingCanvas() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                  <h3 className="font-sans font-semibold text-sm text-white">
                     Recorded Video Export Ready
                   </h3>
                 </div>
                 <button
                   onClick={() => setRecordedVideoUrl(null)}
-                  className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                  className="text-xs text-neutral-300 hover:text-neutral-100 transition-colors"
                 >
                   Dismiss
                 </button>
@@ -3148,23 +3255,23 @@ export default function TrackingCanvas() {
                 </div>
 
                 <div className="md:col-span-4 flex flex-col gap-3">
-                  <p className="text-xs text-neutral-400 leading-relaxed">
+                  <p className="text-xs text-neutral-200 leading-relaxed">
                     This file contains the complete live performance with all trail lines, motion speeds,
                     and trajectory curve mappings baked in.
                   </p>
 
-                  <div className="bg-neutral-950/40 border border-neutral-800/80 rounded p-3 flex flex-col gap-2 font-mono text-[10px] text-neutral-400">
+                  <div className="bg-neutral-950/40 border border-neutral-800/80 rounded p-3 flex flex-col gap-2 font-mono text-[10px] font-medium text-neutral-200">
                     <div className="flex justify-between">
                       <span>Format:</span>
-                      <span className="text-neutral-200 uppercase">{recordedExt}</span>
+                      <span className="text-white uppercase">{recordedExt}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Duration:</span>
-                      <span className="text-neutral-200">{recordingSeconds}s</span>
+                      <span className="text-white">{recordingSeconds}s</span>
                     </div>
                     <div className="flex justify-between">
                       <span>File Size:</span>
-                      <span className="text-neutral-200">{(recordedSize / (1024 * 1024)).toFixed(2)} MB</span>
+                      <span className="text-white">{(recordedSize / (1024 * 1024)).toFixed(2)} MB</span>
                     </div>
                   </div>
 
@@ -3186,7 +3293,7 @@ export default function TrackingCanvas() {
       {!cameraActive && !isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="absolute top-14 right-4 z-20 bg-[#0a0a0a]/90 hover:bg-neutral-900 border border-neutral-800 text-neutral-200 py-2 px-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
+          className="absolute top-14 right-4 z-20 bg-[#0a0a0a]/90 hover:bg-neutral-900 border border-neutral-800 text-white py-2 px-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
         >
           <Sliders className="w-4 h-4 text-blue-400" />
           <span className="text-xs font-semibold tracking-wider font-sans">Settings</span>
@@ -3211,7 +3318,7 @@ export default function TrackingCanvas() {
                   className="bg-[#0a0a0a]/95 backdrop-blur-xl border border-neutral-800/80 rounded-2xl px-4 py-3.5 w-full max-w-[280px] flex flex-col gap-2.5 shadow-2xl pointer-events-auto font-sans"
                 >
                   <div className="flex items-center justify-between text-xs font-semibold">
-                    <div className="flex items-center gap-1.5 text-neutral-300">
+                    <div className="flex items-center gap-1.5 text-neutral-100">
                       <Icon className="w-3.5 h-3.5 text-blue-400" />
                       <span>{item.name}</span>
                     </div>
@@ -3275,13 +3382,13 @@ export default function TrackingCanvas() {
             <div className="flex items-center justify-between border-b border-neutral-800 p-4 pb-3 shrink-0">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-blue-400" />
-                <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                <h3 className="font-sans font-semibold text-sm text-white">
                   Settings Panel
                 </h3>
               </div>
               <button
                 onClick={() => setIsSidebarOpen(false)}
-                className="text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/80 p-1.5 rounded-lg transition-all cursor-pointer"
+                className="text-neutral-200 hover:text-white hover:bg-neutral-800/80 p-1.5 rounded-lg transition-all cursor-pointer"
                 title="Close Settings"
               >
                 <X className="w-4.5 h-4.5" />
@@ -3304,7 +3411,7 @@ export default function TrackingCanvas() {
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded transition-colors relative cursor-pointer ${
-                      isActive ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+                      isActive ? 'text-white' : 'text-neutral-300 hover:text-neutral-100'
                     }`}
                   >
                     {isActive && (
@@ -3315,7 +3422,7 @@ export default function TrackingCanvas() {
                       />
                     )}
                     <Icon className="w-3.5 h-3.5 relative z-10" />
-                    <span className="text-[9px] font-sans font-medium relative z-10 tracking-wider">
+                    <span className="text-[10px] font-medium font-sans font-medium relative z-10 tracking-wider">
                       {label}
                     </span>
                   </button>
@@ -3331,7 +3438,7 @@ export default function TrackingCanvas() {
                     <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
                       <div className="flex items-center gap-2">
                         <Sliders className="w-4 h-4 text-blue-400" />
-                        <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                        <h3 className="font-sans font-semibold text-sm text-white">
                           Quick Visual Presets
                         </h3>
                       </div>
@@ -3339,7 +3446,7 @@ export default function TrackingCanvas() {
                         {originalSettings && (
                           <button
                             onClick={resetToOriginalSettings}
-                            className="text-[10px] text-amber-400 hover:text-amber-300 transition-all flex items-center gap-1 cursor-pointer"
+                            className="text-[10px] font-medium text-amber-400 hover:text-amber-300 transition-all flex items-center gap-1 cursor-pointer"
                           >
                             <RotateCcw className="w-3 h-3" />
                             Reset to Manual
@@ -3347,7 +3454,7 @@ export default function TrackingCanvas() {
                         )}
                         <button
                           onClick={resetToFactoryDefaults}
-                          className="text-[10px] text-red-400 hover:text-red-300 transition-all flex items-center gap-1 cursor-pointer"
+                          className="text-[10px] font-medium text-red-400 hover:text-red-300 transition-all flex items-center gap-1 cursor-pointer"
                           title="Reset all settings to default values and clear local storage"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -3370,7 +3477,7 @@ export default function TrackingCanvas() {
                             }`}
                           >
                             <div className="flex items-start justify-between gap-1 mb-1">
-                              <span className={`font-semibold transition-colors ${isApplied ? 'text-blue-400' : 'text-neutral-200 group-hover:text-white'}`}>
+                              <span className={`font-semibold transition-colors ${isApplied ? 'text-blue-400' : 'text-white group-hover:text-white'}`}>
                                 {preset.name}
                               </span>
                               {preset.id === 'led' && <Zap className={`w-3.5 h-3.5 ${isApplied ? 'text-amber-400' : 'text-amber-500/50 group-hover:text-amber-400'}`} />}
@@ -3380,7 +3487,7 @@ export default function TrackingCanvas() {
                               {preset.id === 'vortex' && <Infinity className={`w-3.5 h-3.5 ${isApplied ? 'text-indigo-400' : 'text-indigo-500/50 group-hover:text-indigo-400'}`} />}
                               {preset.id === 'cascade' && <Moon className={`w-3.5 h-3.5 ${isApplied ? 'text-purple-400' : 'text-purple-500/50 group-hover:text-purple-400'}`} />}
                             </div>
-                            <p className="text-[10px] text-neutral-400 leading-normal mb-2 shrink-0">
+                            <p className="text-[10px] font-medium text-neutral-200 leading-normal mb-2 shrink-0">
                               {preset.description}
                             </p>
                             
@@ -3390,12 +3497,12 @@ export default function TrackingCanvas() {
                                 .filter(Boolean)
                                 .slice(0, 3) // show top 3 settings to keep it clean
                                 .map((disp, i) => (
-                                  <span key={i} className="text-[8px] bg-neutral-950 text-neutral-500 px-1.5 py-0.5 rounded font-mono border border-neutral-950">
+                                  <span key={i} className="text-[9px] font-medium tracking-wide bg-neutral-950 text-neutral-300 px-1.5 py-0.5 rounded font-mono border border-neutral-950">
                                     {disp}
                                   </span>
                                 ))}
                               {Object.keys(preset.settings).length > 3 && (
-                                <span className="text-[8px] bg-neutral-950 text-neutral-600 px-1 rounded font-mono border border-neutral-950">
+                                <span className="text-[9px] font-medium tracking-wide bg-neutral-950 text-neutral-400 px-1 rounded font-mono border border-neutral-950">
                                   +{Object.keys(preset.settings).length - 3} more
                                 </span>
                               )}
@@ -3410,27 +3517,27 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded overflow-hidden">
                     <button
                       onClick={() => setGeminiCollapsed(!geminiCollapsed)}
-                      className="w-full flex items-center justify-between p-3.5 font-sans font-semibold text-xs text-neutral-300 hover:text-white transition-all bg-neutral-900/50 hover:bg-neutral-800/20 cursor-pointer"
+                      className="w-full flex items-center justify-between p-3.5 font-sans font-semibold text-xs text-neutral-100 hover:text-white transition-all bg-neutral-900/50 hover:bg-neutral-800/20 cursor-pointer"
                     >
                       <div className="flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-blue-400" />
                         <span>AI Scene Auto-Tuner</span>
-                        <span className="text-[8px] font-mono bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 uppercase tracking-wider scale-90">
+                        <span className="text-[9px] font-medium tracking-wide font-mono bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 uppercase tracking-wider scale-90">
                           Beta
                         </span>
                       </div>
-                      {geminiCollapsed ? <ChevronDown className="w-4 h-4 text-neutral-500" /> : <ChevronUp className="w-4 h-4 text-neutral-500" />}
+                      {geminiCollapsed ? <ChevronDown className="w-4 h-4 text-neutral-300" /> : <ChevronUp className="w-4 h-4 text-neutral-300" />}
                     </button>
 
                     {!geminiCollapsed && (
                       <div className="p-4 pt-1 border-t border-neutral-800/60 flex flex-col gap-4 animate-slideDown">
                         {!geminiActive && !hasEnvApiKey ? (
                           <div className="flex flex-col gap-3">
-                            <p className="text-xs text-neutral-400 leading-relaxed">
+                            <p className="text-xs text-neutral-200 leading-relaxed">
                               Configure your Gemini API key to auto-tune sensitivity, light-tracking, and artistic settings using frame analysis.
                             </p>
                             <div className="flex flex-col gap-1.5">
-                              <label className="text-[9px] text-neutral-500 font-mono uppercase tracking-wider">
+                              <label className="text-[10px] font-medium text-neutral-300 font-mono uppercase tracking-wider">
                                 Gemini API Key
                               </label>
                               <input
@@ -3438,7 +3545,7 @@ export default function TrackingCanvas() {
                                 placeholder="AIzaSy..."
                                 value={apiKeyInput}
                                 onChange={(e) => setApiKeyInput(e.target.value)}
-                                className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-500 transition-all font-mono"
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-mono"
                               />
                             </div>
                             <button
@@ -3452,15 +3559,15 @@ export default function TrackingCanvas() {
                               href="https://aistudio.google.com/"
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[10px] text-blue-400 hover:underline text-center mt-1"
+                              className="text-[10px] font-medium text-blue-400 hover:underline text-center mt-1"
                             >
                               Get a free API Key from Google AI Studio &rarr;
                             </a>
                           </div>
                         ) : (
                           <div className="flex flex-col gap-4">
-                            <div className="flex items-center justify-between bg-neutral-950/40 p-2 border border-neutral-800 rounded text-[10px]">
-                              <span className="text-neutral-400 flex items-center gap-1">
+                            <div className="flex items-center justify-between bg-neutral-950/40 p-2 border border-neutral-800 rounded text-[10px] font-medium">
+                              <span className="text-neutral-200 flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                                 {hasEnvApiKey && !apiKeyInput ? 'Env API Key Active' : 'Custom API Key Active'}
                               </span>
@@ -3468,14 +3575,14 @@ export default function TrackingCanvas() {
                                 onClick={() => {
                                   handleSaveApiKey('');
                                 }}
-                                className="text-neutral-500 hover:text-neutral-300 underline cursor-pointer"
+                                className="text-neutral-300 hover:text-neutral-100 underline cursor-pointer"
                               >
                                 Reset Key
                               </button>
                             </div>
 
                             {!cameraActive ? (
-                              <div className="text-xs text-neutral-400 text-center py-4 bg-neutral-950/20 border border-dashed border-neutral-800 rounded">
+                              <div className="text-xs text-neutral-200 text-center py-4 bg-neutral-950/20 border border-dashed border-neutral-800 rounded">
                                 Start camera or load a video file to run analysis.
                               </div>
                             ) : (
@@ -3484,7 +3591,7 @@ export default function TrackingCanvas() {
                                 disabled={isGeminiAnalyzing}
                                 className={`w-full font-medium text-xs py-2 px-3 rounded transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 ${
                                   isGeminiAnalyzing
-                                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                    ? 'bg-neutral-800 text-neutral-300 cursor-not-allowed'
                                     : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
                                 }`}
                               >
@@ -3515,10 +3622,10 @@ export default function TrackingCanvas() {
                             {geminiAnalysisResult && (
                               <div className="flex flex-col gap-3 bg-neutral-950/40 border border-neutral-800 rounded p-3 animate-fadeIn">
                                 <div>
-                                  <span className="text-[9px] font-mono text-neutral-500 uppercase tracking-wider block mb-1">
+                                  <span className="text-[10px] font-medium font-mono text-neutral-300 uppercase tracking-wider block mb-1">
                                     AI Analysis
                                   </span>
-                                  <p className="text-xs text-neutral-300 leading-relaxed font-sans">
+                                  <p className="text-xs text-neutral-100 leading-relaxed font-sans">
                                     {geminiAnalysisResult.analysis}
                                   </p>
                                 </div>
@@ -3531,11 +3638,11 @@ export default function TrackingCanvas() {
                                     <span className="text-xs font-semibold text-blue-400">
                                       Option A: {geminiAnalysisResult.optionA.name}
                                     </span>
-                                    <span className="text-[9px] font-mono bg-blue-950/30 text-blue-300 border border-blue-800/40 px-1 rounded uppercase">
+                                    <span className="text-[10px] font-medium font-mono bg-blue-950/30 text-blue-300 border border-blue-800/40 px-1 rounded uppercase">
                                       Tracking
                                     </span>
                                   </div>
-                                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                  <p className="text-[11px] text-neutral-200 leading-relaxed">
                                     {geminiAnalysisResult.optionA.description}
                                   </p>
                                   <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
@@ -3543,7 +3650,7 @@ export default function TrackingCanvas() {
                                       .map(([k, v]) => getSettingDisplayName(k, v))
                                       .filter(Boolean)
                                       .map((disp, i) => (
-                                        <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                        <span key={i} className="text-[10px] font-medium bg-neutral-950 text-neutral-200 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
                                           {disp}
                                         </span>
                                       ))}
@@ -3555,7 +3662,7 @@ export default function TrackingCanvas() {
                                     className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
                                       appliedOption === 'A'
                                         ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
-                                        : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                        : 'bg-neutral-800 hover:bg-neutral-700 text-white hover:text-white border border-neutral-700/50 active:scale-97'
                                     }`}
                                   >
                                     {appliedOption === 'A' ? (
@@ -3575,11 +3682,11 @@ export default function TrackingCanvas() {
                                     <span className="text-xs font-semibold text-purple-400">
                                       Option B: {geminiAnalysisResult.optionB.name}
                                     </span>
-                                    <span className="text-[9px] font-mono bg-purple-950/30 text-purple-300 border border-purple-800/40 px-1 rounded uppercase">
+                                    <span className="text-[10px] font-medium font-mono bg-purple-950/30 text-purple-300 border border-purple-800/40 px-1 rounded uppercase">
                                       Artistic
                                     </span>
                                   </div>
-                                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                  <p className="text-[11px] text-neutral-200 leading-relaxed">
                                     {geminiAnalysisResult.optionB.description}
                                   </p>
                                   <div className="flex flex-wrap gap-1 mt-1 mb-1.5">
@@ -3587,7 +3694,7 @@ export default function TrackingCanvas() {
                                       .map(([k, v]) => getSettingDisplayName(k, v))
                                       .filter(Boolean)
                                       .map((disp, i) => (
-                                        <span key={i} className="text-[9px] bg-neutral-950 text-neutral-400 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
+                                        <span key={i} className="text-[10px] font-medium bg-neutral-950 text-neutral-200 px-1.5 py-0.5 rounded font-mono border border-neutral-800">
                                           {disp}
                                         </span>
                                       ))}
@@ -3599,7 +3706,7 @@ export default function TrackingCanvas() {
                                     className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-1 cursor-pointer ${
                                       appliedOption === 'B'
                                         ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 cursor-default'
-                                        : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/50 active:scale-97'
+                                        : 'bg-neutral-800 hover:bg-neutral-700 text-white hover:text-white border border-neutral-700/50 active:scale-97'
                                     }`}
                                   >
                                     {appliedOption === 'B' ? (
@@ -3624,7 +3731,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-2">
                       <Bookmark className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         Saved Presets
                       </h3>
                     </div>
@@ -3637,7 +3744,7 @@ export default function TrackingCanvas() {
                         value={savePresetName}
                         onChange={(e) => setSavePresetName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSavePreset()}
-                        className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-500 transition-all placeholder:text-neutral-600"
+                        className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all placeholder:text-neutral-400"
                       />
                       <button
                         onClick={handleSavePreset}
@@ -3651,7 +3758,7 @@ export default function TrackingCanvas() {
 
                     {/* List */}
                     {savedPresets.length === 0 ? (
-                      <p className="text-[11px] text-neutral-500 text-center py-3">
+                      <p className="text-[11px] text-neutral-300 text-center py-3">
                         No saved presets yet. Tweak your settings and save them above.
                       </p>
                     ) : (
@@ -3663,14 +3770,14 @@ export default function TrackingCanvas() {
                           >
                             <button
                               onClick={() => handleLoadPreset(p)}
-                              className="flex-1 text-left text-xs text-neutral-300 hover:text-white transition-colors cursor-pointer truncate"
+                              className="flex-1 text-left text-xs text-neutral-100 hover:text-white transition-colors cursor-pointer truncate"
                               title={`Load "${p.name}"`}
                             >
                               {p.name}
                             </button>
                             <button
                               onClick={() => handleDeletePreset(p.id)}
-                              className="text-neutral-600 hover:text-red-400 transition-colors cursor-pointer ml-2 opacity-0 group-hover:opacity-100 p-0.5"
+                              className="text-neutral-400 hover:text-red-400 transition-colors cursor-pointer ml-2 opacity-0 group-hover:opacity-100 p-0.5"
                               title="Delete preset"
                             >
                               <X className="w-3 h-3" />
@@ -3689,7 +3796,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
                       <Trash2 className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         Object Removal (Clone Stamp)
                       </h3>
                     </div>
@@ -3697,15 +3804,15 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-4 py-2">
                       <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
                         <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-                        <p className="text-xs text-neutral-300 leading-relaxed">
+                        <p className="text-xs text-neutral-100 leading-relaxed">
                           Paint over unwanted static objects to hide them. Copies details from a customizable clean background offset.
                         </p>
                       </div>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
                         <div className="flex flex-col">
                           <span className="font-medium">Enable Object Removal</span>
-                          <span className="text-[10px] text-neutral-500">Activate paint brush to remove static elements</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Activate paint brush to remove static elements</span>
                         </div>
                         <input
                           type="checkbox"
@@ -3723,8 +3830,8 @@ export default function TrackingCanvas() {
                           {/* Brush Size */}
                           <div className="flex flex-col gap-1.5 mt-2">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Brush Size</span>
-                              <span className="text-neutral-200 font-mono">{settings.cloneStampBrushSize}px</span>
+                              <span className="text-neutral-200">Brush Size</span>
+                              <span className="text-white font-mono">{settings.cloneStampBrushSize}px</span>
                             </div>
                             <input
                               type="range"
@@ -3742,10 +3849,10 @@ export default function TrackingCanvas() {
                           {/* Feather */}
                           <div className="flex flex-col gap-1.5 mt-2">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400 flex items-center gap-1.5">
+                              <span className="text-neutral-200 flex items-center gap-1.5">
                                 Feather
                               </span>
-                              <span className="text-neutral-200 font-mono">{settings.cloneStampFeather}px</span>
+                              <span className="text-white font-mono">{settings.cloneStampFeather}px</span>
                             </div>
                             <input
                               type="range"
@@ -3763,8 +3870,8 @@ export default function TrackingCanvas() {
                           {/* Offset X */}
                           <div className="flex flex-col gap-1.5 mt-2">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Offset X</span>
-                              <span className="text-neutral-200 font-mono">{settings.cloneStampOffsetX}px</span>
+                              <span className="text-neutral-200">Offset X</span>
+                              <span className="text-white font-mono">{settings.cloneStampOffsetX}px</span>
                             </div>
                             <input
                               type="range"
@@ -3782,8 +3889,8 @@ export default function TrackingCanvas() {
                           {/* Offset Y */}
                           <div className="flex flex-col gap-1.5 mt-2">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Offset Y</span>
-                              <span className="text-neutral-200 font-mono">{settings.cloneStampOffsetY}px</span>
+                              <span className="text-neutral-200">Offset Y</span>
+                              <span className="text-white font-mono">{settings.cloneStampOffsetY}px</span>
                             </div>
                             <input
                               type="range"
@@ -3827,7 +3934,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
                       <Flame className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         Pixel Effect Painting
                       </h3>
                     </div>
@@ -3835,15 +3942,15 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-4 py-2">
                       <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
                         <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-                        <p className="text-xs text-neutral-300 leading-relaxed">
+                        <p className="text-xs text-neutral-100 leading-relaxed">
                           Projects colors from pattern templates along the path of moving LED props or mouse drags.
                         </p>
                       </div>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
                         <div className="flex flex-col">
                           <span className="font-medium">Enable Pixel Effect Mode</span>
-                          <span className="text-[10px] text-neutral-500">Paint patterns instead of basic motion trails</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Paint patterns instead of basic motion trails</span>
                         </div>
                         <input
                           type="checkbox"
@@ -3860,10 +3967,10 @@ export default function TrackingCanvas() {
                         <>
                           {/* LED Brightness Filter and Threshold */}
                           <div className="flex flex-col gap-2 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                            <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                               <div className="flex flex-col">
                                 <span className="font-medium text-[11px]">Filter by Brightness</span>
-                                <span className="text-[9px] text-neutral-500">Only track bright moving objects (filters out noise)</span>
+                                <span className="text-[10px] font-medium text-neutral-300">Only track bright moving objects (filters out noise)</span>
                               </div>
                               <input
                                 type="checkbox"
@@ -3878,9 +3985,9 @@ export default function TrackingCanvas() {
 
                             {settings.enableLightTracking && (
                               <div className="flex flex-col gap-1 mt-1 border-t border-neutral-800/60 pt-2">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-400">LED Brightness Threshold</span>
-                                  <span className="text-neutral-200 font-mono">{settings.lightThreshold}</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-200">LED Brightness Threshold</span>
+                                  <span className="text-white font-mono">{settings.lightThreshold}</span>
                                 </div>
                                 <input
                                   type="range"
@@ -3897,13 +4004,13 @@ export default function TrackingCanvas() {
                             )}
                           </div>
                           <div className="flex flex-col gap-1.5">
-                            <span className="text-xs text-neutral-400">Pattern Source</span>
+                            <span className="text-xs text-neutral-200">Pattern Source</span>
                             <select
                               value={settings.poiPatternType}
                               onChange={(e) =>
                                 setSettings((prev) => ({ ...prev, poiPatternType: e.target.value as any }))
                               }
-                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer"
                             >
                               <option value="rainbow">Spectrum Gradient</option>
                               <option value="flowers">Concentric Flowers</option>
@@ -3917,13 +4024,13 @@ export default function TrackingCanvas() {
                             </select>
                           </div>
                            <div className="flex flex-col gap-1.5">
-                            <span className="text-xs text-neutral-400">Effect Orientation</span>
+                            <span className="text-xs text-neutral-200">Effect Orientation</span>
                             <select
                               value={settings.poiOrientation}
                               onChange={(e) =>
                                 setSettings((prev) => ({ ...prev, poiOrientation: e.target.value as any }))
                               }
-                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer"
                             >
                               <option value="club">Align with Juggling Club (Auto)</option>
                               <option value="vertical">Static Vertical (Flags / Text)</option>
@@ -3934,13 +4041,13 @@ export default function TrackingCanvas() {
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span className="text-xs text-neutral-400">Pattern Mapping Mode</span>
+                            <span className="text-xs text-neutral-200">Pattern Mapping Mode</span>
                             <select
                               value={settings.poiMappingMode}
                               onChange={(e) =>
                                 setSettings((prev) => ({ ...prev, poiMappingMode: e.target.value as any }))
                               }
-                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer"
                             >
                               <option value="angle">Map to Club Rotation (for Light Wheels)</option>
                               <option value="spatial">Map to Screen Position (for Flags & Text)</option>
@@ -3949,13 +4056,13 @@ export default function TrackingCanvas() {
                           </div>
 
                           <div className="flex flex-col gap-1.5">
-                            <span className="text-xs text-neutral-400">Render Style</span>
+                            <span className="text-xs text-neutral-200">Render Style</span>
                             <select
                               value={settings.poiRenderMode}
                               onChange={(e) =>
                                 setSettings((prev) => ({ ...prev, poiRenderMode: e.target.value as any }))
                               }
-                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer"
                             >
                               <option value="dots">Dotted LEDs (Discrete Points)</option>
                               <option value="solid">Solid Ribbon (Smeared Brush)</option>
@@ -3964,12 +4071,12 @@ export default function TrackingCanvas() {
 
                           {/* POV Sweep Settings */}
                           <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                            <span className="text-[10px] text-neutral-400 block font-medium">POV Sweep (Persistence of Vision)</span>
+                            <span className="text-[10px] font-medium text-neutral-200 block font-medium">POV Sweep (Persistence of Vision)</span>
                             
-                            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                            <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                               <div className="flex flex-col">
                                 <span className="font-medium text-[11px]">Enable POV Sweep</span>
-                                <span className="text-[9px] text-neutral-500">Paint image across the motion trail (like real pixel poi)</span>
+                                <span className="text-[10px] font-medium text-neutral-300">Paint image across the motion trail (like real pixel poi)</span>
                               </div>
                               <input type="checkbox" checked={settings.poiPovEnabled ?? false}
                                 onChange={(e) => setSettings((prev) => ({ ...prev, poiPovEnabled: e.target.checked }))}
@@ -3979,9 +4086,9 @@ export default function TrackingCanvas() {
 
                             {(settings.poiPovEnabled ?? false) && (<>
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Trail Retention</span>
-                                  <span className="text-neutral-300 font-mono">{settings.poiPovRetention ?? 400}ms</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Trail Retention</span>
+                                  <span className="text-neutral-100 font-mono">{settings.poiPovRetention ?? 400}ms</span>
                                 </div>
                                 <input type="range" min="50" max="2000" step="25" value={settings.poiPovRetention ?? 400}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiPovRetention: parseInt(e.target.value) }))}
@@ -3989,9 +4096,9 @@ export default function TrackingCanvas() {
                               </div>
 
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Column Spacing</span>
-                                  <span className="text-neutral-300 font-mono">{settings.poiPovColumnSpacing ?? 3}px</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Column Spacing</span>
+                                  <span className="text-neutral-100 font-mono">{settings.poiPovColumnSpacing ?? 3}px</span>
                                 </div>
                                 <input type="range" min="1" max="20" step="1" value={settings.poiPovColumnSpacing ?? 3}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiPovColumnSpacing: parseInt(e.target.value) }))}
@@ -3999,10 +4106,10 @@ export default function TrackingCanvas() {
                               </div>
 
                               <div className="flex flex-col gap-1.5">
-                                <span className="text-[10px] text-neutral-500">Fade Curve</span>
+                                <span className="text-[10px] font-medium text-neutral-300">Fade Curve</span>
                                 <select value={settings.poiPovFadeMode ?? 'exponential'}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiPovFadeMode: e.target.value as any }))}
-                                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer">
+                                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer">
                                   <option value="exponential">Exponential (Smooth, Natural)</option>
                                   <option value="linear">Linear (Even Fade)</option>
                                   <option value="sharp">Sharp (Hard Cutoff)</option>
@@ -4010,10 +4117,10 @@ export default function TrackingCanvas() {
                               </div>
 
                               <div className="flex flex-col gap-1.5">
-                                <span className="text-[10px] text-neutral-500">Motion Type</span>
+                                <span className="text-[10px] font-medium text-neutral-300">Motion Type</span>
                                 <select value={settings.poiPovMotionMode ?? 'free'}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiPovMotionMode: e.target.value as any }))}
-                                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer">
+                                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-100 outline-none focus:border-blue-500 cursor-pointer">
                                   <option value="free">Free Path (Any motion — throws, swings, etc.)</option>
                                   <option value="circular">Circular (Optimized for spinning — wraps image around rotation)</option>
                                 </select>
@@ -4023,12 +4130,12 @@ export default function TrackingCanvas() {
 
                           {/* LED Glow Settings */}
                           <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                            <span className="text-[10px] text-neutral-400 block font-medium">LED Glow / Bloom</span>
+                            <span className="text-[10px] font-medium text-neutral-200 block font-medium">LED Glow / Bloom</span>
                             
-                            <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                            <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                               <div className="flex flex-col">
                                 <span className="font-medium text-[11px]">Enable Glow Halos</span>
-                                <span className="text-[9px] text-neutral-500">Adds realistic light bloom around each LED dot</span>
+                                <span className="text-[10px] font-medium text-neutral-300">Adds realistic light bloom around each LED dot</span>
                               </div>
                               <input type="checkbox" checked={settings.poiGlowEnabled ?? false}
                                 onChange={(e) => setSettings((prev) => ({ ...prev, poiGlowEnabled: e.target.checked }))}
@@ -4038,9 +4145,9 @@ export default function TrackingCanvas() {
 
                             {(settings.poiGlowEnabled ?? false) && (<>
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Glow Radius</span>
-                                  <span className="text-neutral-300 font-mono">{settings.poiGlowRadius ?? 6}px</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Glow Radius</span>
+                                  <span className="text-neutral-100 font-mono">{settings.poiGlowRadius ?? 6}px</span>
                                 </div>
                                 <input type="range" min="2" max="20" step="1" value={settings.poiGlowRadius ?? 6}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiGlowRadius: parseInt(e.target.value) }))}
@@ -4048,9 +4155,9 @@ export default function TrackingCanvas() {
                               </div>
 
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Glow Intensity</span>
-                                  <span className="text-neutral-300 font-mono">{Math.round((settings.poiGlowIntensity ?? 0.5) * 100)}%</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Glow Intensity</span>
+                                  <span className="text-neutral-100 font-mono">{Math.round((settings.poiGlowIntensity ?? 0.5) * 100)}%</span>
                                 </div>
                                 <input type="range" min="0.1" max="1.0" step="0.05" value={settings.poiGlowIntensity ?? 0.5}
                                   onChange={(e) => setSettings((prev) => ({ ...prev, poiGlowIntensity: parseFloat(e.target.value) }))}
@@ -4059,9 +4166,9 @@ export default function TrackingCanvas() {
                             </>)}
 
                             <div className="flex flex-col gap-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="text-neutral-500">LED Count (per column)</span>
-                                <span className="text-neutral-300 font-mono">{(settings.poiLedCount ?? 0) === 0 ? "Auto" : settings.poiLedCount}</span>
+                              <div className="flex justify-between text-[10px] font-medium">
+                                <span className="text-neutral-300">LED Count (per column)</span>
+                                <span className="text-neutral-100 font-mono">{(settings.poiLedCount ?? 0) === 0 ? "Auto" : settings.poiLedCount}</span>
                               </div>
                               <input type="range" min="0" max="72" step="4" value={settings.poiLedCount ?? 0}
                                 onChange={(e) => setSettings((prev) => ({ ...prev, poiLedCount: parseInt(e.target.value) }))}
@@ -4071,12 +4178,12 @@ export default function TrackingCanvas() {
 
                           {settings.poiOrientation === 'radial' && (
                             <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                              <span className="text-[10px] text-neutral-400 block font-medium">Center of Rotation (Crosshair)</span>
+                              <span className="text-[10px] font-medium text-neutral-200 block font-medium">Center of Rotation (Crosshair)</span>
                               
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Horizontal Center</span>
-                                  <span className="text-neutral-300 font-mono">{Math.round(settings.poiCenterRelativeX * 100)}%</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Horizontal Center</span>
+                                  <span className="text-neutral-100 font-mono">{Math.round(settings.poiCenterRelativeX * 100)}%</span>
                                 </div>
                                 <input
                                   type="range"
@@ -4092,9 +4199,9 @@ export default function TrackingCanvas() {
                               </div>
 
                               <div className="flex flex-col gap-1">
-                                <div className="flex justify-between text-[10px]">
-                                  <span className="text-neutral-500">Vertical Center</span>
-                                  <span className="text-neutral-300 font-mono">{Math.round(settings.poiCenterRelativeY * 100)}%</span>
+                                <div className="flex justify-between text-[10px] font-medium">
+                                  <span className="text-neutral-300">Vertical Center</span>
+                                  <span className="text-neutral-100 font-mono">{Math.round(settings.poiCenterRelativeY * 100)}%</span>
                                 </div>
                                 <input
                                   type="range"
@@ -4112,8 +4219,8 @@ export default function TrackingCanvas() {
                           )}
                            <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Effect Height (Length)</span>
-                              <span className="text-neutral-200 font-mono">
+                              <span className="text-neutral-200">Effect Height (Length)</span>
+                              <span className="text-white font-mono">
                                 {settings.poiHeight === 0 ? "Auto (Club Length)" : `${settings.poiHeight}px`}
                               </span>
                             </div>
@@ -4132,8 +4239,8 @@ export default function TrackingCanvas() {
 
                           <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Effect Width (Thickness)</span>
-                              <span className="text-neutral-200 font-mono">{settings.poiWidth}px</span>
+                              <span className="text-neutral-200">Effect Width (Thickness)</span>
+                              <span className="text-white font-mono">{settings.poiWidth}px</span>
                             </div>
                             <input
                               type="range"
@@ -4150,8 +4257,8 @@ export default function TrackingCanvas() {
 
                           <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Pattern Draw Speed</span>
-                              <span className="text-neutral-200 font-mono">{settings.poiSpeedMultiplier.toFixed(1)}x</span>
+                              <span className="text-neutral-200">Pattern Draw Speed</span>
+                              <span className="text-white font-mono">{settings.poiSpeedMultiplier.toFixed(1)}x</span>
                             </div>
                             <input
                               type="range"
@@ -4168,8 +4275,8 @@ export default function TrackingCanvas() {
 
                           <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Max Tracking Spots</span>
-                              <span className="text-neutral-200 font-mono">{settings.poiMaxPoints} props</span>
+                              <span className="text-neutral-200">Max Tracking Spots</span>
+                              <span className="text-white font-mono">{settings.poiMaxPoints} props</span>
                             </div>
                             <input
                               type="range"
@@ -4186,8 +4293,8 @@ export default function TrackingCanvas() {
 
                           <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Effect Opacity</span>
-                              <span className="text-neutral-200 font-mono">{Math.round(settings.poiOpacity * 100)}%</span>
+                              <span className="text-neutral-200">Effect Opacity</span>
+                              <span className="text-white font-mono">{Math.round(settings.poiOpacity * 100)}%</span>
                             </div>
                             <input
                               type="range"
@@ -4204,8 +4311,8 @@ export default function TrackingCanvas() {
 
                           <div className="flex flex-col gap-1">
                             <div className="flex justify-between text-xs">
-                              <span className="text-neutral-400">Frame Paint Interval</span>
-                              <span className="text-neutral-200 font-mono">
+                              <span className="text-neutral-200">Frame Paint Interval</span>
+                              <span className="text-white font-mono">
                                 {settings.poiFrameInterval === 1 ? "Every Frame" : `Every ${settings.poiFrameInterval} Frames`}
                               </span>
                             </div>
@@ -4223,12 +4330,12 @@ export default function TrackingCanvas() {
                           </div>
 
                           <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
-                            <span className="text-[10px] text-neutral-400 block font-medium">Strobe Envelope (ADSR)</span>
+                            <span className="text-[10px] font-medium text-neutral-200 block font-medium">Strobe Envelope (ADSR)</span>
                             
                             <div className="flex flex-col gap-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="text-neutral-500">Fade In Time</span>
-                                <span className="text-neutral-300 font-mono">
+                              <div className="flex justify-between text-[10px] font-medium">
+                                <span className="text-neutral-300">Fade In Time</span>
+                                <span className="text-neutral-100 font-mono">
                                   {settings.poiFadeInTime === 0 ? "None" : `${settings.poiFadeInTime} f`}
                                 </span>
                               </div>
@@ -4246,9 +4353,9 @@ export default function TrackingCanvas() {
                             </div>
 
                             <div className="flex flex-col gap-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="text-neutral-500">Hold Active Time</span>
-                                <span className="text-neutral-300 font-mono">
+                              <div className="flex justify-between text-[10px] font-medium">
+                                <span className="text-neutral-300">Hold Active Time</span>
+                                <span className="text-neutral-100 font-mono">
                                   {settings.poiHoldTime === 0 ? "Constant" : `${settings.poiHoldTime} f`}
                                 </span>
                               </div>
@@ -4266,9 +4373,9 @@ export default function TrackingCanvas() {
                             </div>
 
                             <div className="flex flex-col gap-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="text-neutral-500">Fade Out Time</span>
-                                <span className="text-neutral-300 font-mono">
+                              <div className="flex justify-between text-[10px] font-medium">
+                                <span className="text-neutral-300">Fade Out Time</span>
+                                <span className="text-neutral-100 font-mono">
                                   {settings.poiFadeOutTime === 0 ? "None" : `${settings.poiFadeOutTime} f`}
                                 </span>
                               </div>
@@ -4286,9 +4393,9 @@ export default function TrackingCanvas() {
                             </div>
 
                             <div className="flex flex-col gap-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className="text-neutral-500">Wait / Inactive Time</span>
-                                <span className="text-neutral-300 font-mono">
+                              <div className="flex justify-between text-[10px] font-medium">
+                                <span className="text-neutral-300">Wait / Inactive Time</span>
+                                <span className="text-neutral-100 font-mono">
                                   {settings.poiWaitTime === 0 ? "None" : `${settings.poiWaitTime} f`}
                                 </span>
                               </div>
@@ -4318,7 +4425,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
                       <Activity className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         LED Echo Trails
                       </h3>
                     </div>
@@ -4326,15 +4433,15 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-4 py-2">
                       <div className="p-3 bg-neutral-900 border border-neutral-700/50 rounded-sm flex items-start gap-3">
                         <Sparkles className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-                        <p className="text-xs text-neutral-300 leading-relaxed">
+                        <p className="text-xs text-neutral-100 leading-relaxed">
                           Pixel-perfect masking extracts moving props and stamps them into an echo buffer. The trail matches the exact shape, brightness, and colors of your flow prop at each frame.
                         </p>
                       </div>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all">
                         <div className="flex flex-col">
                           <span className="font-medium">Enable Motion Trails</span>
-                          <span className="text-[10px] text-neutral-500">Stamp and draw moving paths on the screen</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Stamp and draw moving paths on the screen</span>
                         </div>
                         <input
                           type="checkbox"
@@ -4350,13 +4457,13 @@ export default function TrackingCanvas() {
                       <div className="flex flex-col gap-1.5 mt-2">
                         <div className="flex justify-between text-xs">
                           <div className="flex flex-col">
-                            <span className="text-neutral-400 flex items-center gap-1.5">
-                              <Activity className="w-3.5 h-3.5 text-neutral-400/80" />
+                            <span className="text-neutral-200 flex items-center gap-1.5">
+                              <Activity className="w-3.5 h-3.5 text-neutral-200/80" />
                               Mask Sensitivity
                             </span>
-                            <span className="text-[10px] text-neutral-500">Controls how much motion is picked up by the camera.</span>
+                            <span className="text-[10px] font-medium text-neutral-300">Controls how much motion is picked up by the camera.</span>
                           </div>
-                          <span className="text-neutral-200 font-mono shrink-0 text-right">{100 - settings.motionThreshold}%</span>
+                          <span className="text-white font-mono shrink-0 text-right">{100 - settings.motionThreshold}%</span>
                         </div>
                         <input
                           type="range"
@@ -4369,16 +4476,16 @@ export default function TrackingCanvas() {
                           }
                           className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
                         />
-                        <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
+                        <div className="flex justify-between text-[10px] font-medium text-neutral-300 px-1 mt-1">
                           <span>Less (Ignores noise)</span>
                           <span>More (Extracts everything)</span>
                         </div>
                       </div>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all mt-2">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none bg-neutral-950/20 border border-neutral-800/60 p-2.5 rounded-sm hover:border-neutral-700/60 transition-all mt-2">
                         <div className="flex flex-col">
                           <span className="font-medium">Filter by Brightness</span>
-                          <span className="text-[10px] text-neutral-500">Only track bright moving objects (e.g. LED props)</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Only track bright moving objects (e.g. LED props)</span>
                         </div>
                         <input
                           type="checkbox"
@@ -4394,13 +4501,13 @@ export default function TrackingCanvas() {
                       <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${!settings.enableLightTracking ? 'hidden' : ''}`}>
                         <div className="flex justify-between text-xs">
                           <div className="flex flex-col">
-                            <span className="text-neutral-400 flex items-center gap-1.5">
-                              <Eye className="w-3.5 h-3.5 text-neutral-400/80" />
+                            <span className="text-neutral-200 flex items-center gap-1.5">
+                              <Eye className="w-3.5 h-3.5 text-neutral-200/80" />
                               Brightness Threshold
                             </span>
-                            <span className="text-[10px] text-neutral-500">Minimum brightness to track.</span>
+                            <span className="text-[10px] font-medium text-neutral-300">Minimum brightness to track.</span>
                           </div>
-                          <span className="text-neutral-200 font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
+                          <span className="text-white font-mono shrink-0 text-right">{Math.round((settings.lightThreshold / 255) * 100)}%</span>
                         </div>
                         <input
                           type="range"
@@ -4418,13 +4525,13 @@ export default function TrackingCanvas() {
                       <div className={`flex flex-col gap-1.5 mt-2 transition-all duration-200 ${(!settings.enableTrails && settings.strobeRate === 0) ? 'opacity-40 pointer-events-none' : ''}`}>
                         <div className="flex justify-between text-xs">
                           <div className="flex flex-col">
-                            <span className="text-neutral-400 flex items-center gap-1.5">
-                              <Waves className="w-3.5 h-3.5 text-neutral-400/80" />
+                            <span className="text-neutral-200 flex items-center gap-1.5">
+                              <Waves className="w-3.5 h-3.5 text-neutral-200/80" />
                               Echo Trail Length
                             </span>
-                            <span className="text-[10px] text-neutral-500">How long the trail persists before fading away.</span>
+                            <span className="text-[10px] font-medium text-neutral-300">How long the trail persists before fading away.</span>
                           </div>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {Math.round((1 - settings.echoFadeRate) * 100) === 0 
                               ? '0% (No Trail)' 
                               : Math.round((1 - settings.echoFadeRate) * 100) === 100 
@@ -4448,7 +4555,7 @@ export default function TrackingCanvas() {
 
                       {/* Edge & Glow Effects Subgroup */}
                       <div className="bg-neutral-950/40 border border-neutral-800/80 rounded-md p-3.5 flex flex-col gap-4 mt-2">
-                        <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-semibold border-b border-neutral-800/60 pb-1.5 flex items-center gap-1.5">
+                        <span className="text-[10px] font-medium font-mono text-neutral-200 uppercase tracking-wider font-semibold border-b border-neutral-800/60 pb-1.5 flex items-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5 text-blue-400" />
                           Edge & Glow Controls
                         </span>
@@ -4457,10 +4564,10 @@ export default function TrackingCanvas() {
                         <div className="flex flex-col gap-1.5">
                           <div className="flex justify-between text-xs">
                             <div className="flex flex-col">
-                              <span className="text-neutral-400">Shape Anti-Aliasing</span>
-                              <span className="text-[10px] text-neutral-500">Smooths pixelated staircases on mask edges perfectly without smearing the shape.</span>
+                              <span className="text-neutral-200">Shape Anti-Aliasing</span>
+                              <span className="text-[10px] font-medium text-neutral-300">Smooths pixelated staircases on mask edges perfectly without smearing the shape.</span>
                             </div>
-                            <span className="text-neutral-200 font-mono">{settings.edgeAntiAliasing}</span>
+                            <span className="text-white font-mono">{settings.edgeAntiAliasing}</span>
                           </div>
                           <input
                             type="range"
@@ -4479,13 +4586,13 @@ export default function TrackingCanvas() {
                         <div className="flex flex-col gap-1.5">
                           <div className="flex justify-between text-xs">
                             <div className="flex flex-col">
-                              <span className="text-neutral-400 flex items-center gap-1.5">
-                                <Award className="w-3.5 h-3.5 text-neutral-400/80" />
+                              <span className="text-neutral-200 flex items-center gap-1.5">
+                                <Award className="w-3.5 h-3.5 text-neutral-200/80" />
                                 Smear Edges
                               </span>
-                              <span className="text-[10px] text-neutral-500">Applies a spatial blur (creates a glowing cloud if set too high).</span>
+                              <span className="text-[10px] font-medium text-neutral-300">Applies a spatial blur (creates a glowing cloud if set too high).</span>
                             </div>
-                            <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
+                            <span className="text-white font-mono">{settings.lineSmoothness}px</span>
                           </div>
                           <input
                             type="range"
@@ -4504,13 +4611,13 @@ export default function TrackingCanvas() {
                         <div className="flex flex-col gap-1.5">
                           <div className="flex justify-between text-xs">
                             <div className="flex flex-col">
-                              <span className="text-neutral-400 flex items-center gap-1.5">
-                                <Sparkles className="w-3.5 h-3.5 text-neutral-400/80" />
+                              <span className="text-neutral-200 flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-neutral-200/80" />
                                 Trail Blur Amount
                               </span>
-                              <span className="text-[10px] text-neutral-500">Applies a soft glow-like blur to the trails.</span>
+                              <span className="text-[10px] font-medium text-neutral-300">Applies a soft glow-like blur to the trails.</span>
                             </div>
-                            <span className="text-neutral-200 font-mono">{settings.blurAmount}px</span>
+                            <span className="text-white font-mono">{settings.blurAmount}px</span>
                           </div>
                           <input
                             type="range"
@@ -4529,13 +4636,13 @@ export default function TrackingCanvas() {
                       <div className="flex flex-col gap-1.5 mt-2">
                         <div className="flex justify-between text-xs">
                           <div className="flex flex-col">
-                            <span className="text-neutral-400 flex items-center gap-1.5">
-                              <Sliders className="w-3.5 h-3.5 text-neutral-400/80" />
+                            <span className="text-neutral-200 flex items-center gap-1.5">
+                              <Sliders className="w-3.5 h-3.5 text-neutral-200/80" />
                               Color Hue Shift
                             </span>
-                            <span className="text-[10px] text-neutral-500">Shifts the colors of the trail permanently.</span>
+                            <span className="text-[10px] font-medium text-neutral-300">Shifts the colors of the trail permanently.</span>
                           </div>
-                          <span className="text-neutral-200 font-mono">{settings.hueRotate}°</span>
+                          <span className="text-white font-mono">{settings.hueRotate}°</span>
                         </div>
                         <input
                           type="range"
@@ -4552,8 +4659,8 @@ export default function TrackingCanvas() {
                       
                       <div className="flex flex-col gap-1.5 mt-2">
                         <div className="flex flex-col mb-1">
-                          <span className="text-xs text-neutral-400">Blend Mode</span>
-                          <span className="text-[10px] text-neutral-500">How new frames blend with older trails.</span>
+                          <span className="text-xs text-neutral-200">Blend Mode</span>
+                          <span className="text-[10px] font-medium text-neutral-300">How new frames blend with older trails.</span>
                         </div>
                         <select
                           value={settings.enableTrails ? settings.compositeMode : 'none'}
@@ -4565,7 +4672,7 @@ export default function TrackingCanvas() {
                               setSettings((prev) => ({ ...prev, enableTrails: true, compositeMode: val }));
                             }
                           }}
-                          className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
+                          className="w-full bg-neutral-800 text-xs text-white border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
                         >
                           <option value="none">Disabled (No Trails)</option>
                           <option value="screen">Screen (Glow)</option>
@@ -4586,7 +4693,7 @@ export default function TrackingCanvas() {
                     <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
                       <div className="flex items-center gap-2">
                         <Camera className="w-4 h-4 text-blue-400" />
-                        <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                        <h3 className="font-sans font-semibold text-sm text-white">
                           Camera Adjustments
                         </h3>
                       </div>
@@ -4599,14 +4706,14 @@ export default function TrackingCanvas() {
                           temperature: 0,
                           tint: 0
                         }))}
-                        className="text-[10px] text-neutral-400 hover:text-neutral-200 bg-neutral-800 hover:bg-neutral-750 px-2 py-1 rounded transition-all"
+                        className="text-[10px] font-medium text-neutral-200 hover:text-white bg-neutral-800 hover:bg-neutral-750 px-2 py-1 rounded transition-all"
                         title="Reset all adjustments to defaults"
                       >
                         Reset All
                       </button>
                     </div>
 
-                    <p className="text-[10px] text-neutral-500 -mt-2">
+                    <p className="text-[10px] font-medium text-neutral-300 -mt-2">
                       Fine-tune feed properties. Double-click any slider to reset it individually.
                     </p>
 
@@ -4614,11 +4721,11 @@ export default function TrackingCanvas() {
                       {/* Exposure */}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Sun className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Sun className="w-3.5 h-3.5 text-neutral-200/80" />
                             Exposure (Brightness)
                           </span>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {settings.exposure > 0 ? `+${settings.exposure}` : settings.exposure}%
                           </span>
                         </div>
@@ -4639,11 +4746,11 @@ export default function TrackingCanvas() {
                       {/* Contrast */}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Contrast className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Contrast className="w-3.5 h-3.5 text-neutral-200/80" />
                             Contrast
                           </span>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {settings.contrast > 0 ? `+${settings.contrast}` : settings.contrast}%
                           </span>
                         </div>
@@ -4664,11 +4771,11 @@ export default function TrackingCanvas() {
                       {/* Saturation */}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Palette className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Palette className="w-3.5 h-3.5 text-neutral-200/80" />
                             Saturation (Color)
                           </span>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {settings.saturation > 0 ? `+${settings.saturation}` : settings.saturation}%
                           </span>
                         </div>
@@ -4689,11 +4796,11 @@ export default function TrackingCanvas() {
                       {/* Temperature */}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Thermometer className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Thermometer className="w-3.5 h-3.5 text-neutral-200/80" />
                             Temperature (Warmth)
                           </span>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {settings.temperature > 0 ? `+${settings.temperature}` : settings.temperature}%
                           </span>
                         </div>
@@ -4709,7 +4816,7 @@ export default function TrackingCanvas() {
                           }
                           className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
                         />
-                        <div className="flex justify-between text-[9px] text-neutral-500 px-1 -mt-0.5">
+                        <div className="flex justify-between text-[10px] font-medium text-neutral-300 px-1 -mt-0.5">
                           <span>Cool (Blue)</span>
                           <span>Warm (Amber)</span>
                         </div>
@@ -4718,11 +4825,11 @@ export default function TrackingCanvas() {
                       {/* Tint */}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-xs">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Sliders className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Sliders className="w-3.5 h-3.5 text-neutral-200/80" />
                             Tint (Green / Magenta)
                           </span>
-                          <span className="text-neutral-200 font-mono">
+                          <span className="text-white font-mono">
                             {settings.tint > 0 ? `+${settings.tint}` : settings.tint}%
                           </span>
                         </div>
@@ -4738,7 +4845,7 @@ export default function TrackingCanvas() {
                           }
                           className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
                         />
-                        <div className="flex justify-between text-[9px] text-neutral-500 px-1 -mt-0.5">
+                        <div className="flex justify-between text-[10px] font-medium text-neutral-300 px-1 -mt-0.5">
                           <span>Green</span>
                           <span>Magenta</span>
                         </div>
@@ -4754,7 +4861,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
                       <Sparkles className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         Cinematic Effects
                       </h3>
                     </div>
@@ -4762,13 +4869,13 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-1">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Camera className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Camera className="w-3.5 h-3.5 text-neutral-200/80" />
                             Chronophotography (Strobe)
                           </span>
-                          <span className="text-[10px] text-neutral-500">Captures distinct snapshot frames instead of a continuous trail.</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Captures distinct snapshot frames instead of a continuous trail.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">
+                        <span className="text-white font-mono shrink-0 text-right">
                           {settings.strobeRate === 0 ? 'Off' : `Every ${settings.strobeRate.toFixed(2)}s`}
                         </span>
                       </div>
@@ -4787,8 +4894,8 @@ export default function TrackingCanvas() {
                       {settings.strobeRate > 0 && (
                         <div className="flex items-center justify-between gap-4 mt-2 p-2.5 rounded-lg bg-neutral-950/40 border border-neutral-800/60 transition-all duration-300">
                           <div className="flex flex-col">
-                            <span className="text-[11px] font-medium text-neutral-300">Strobe Style</span>
-                            <span className="text-[9px] text-neutral-500 leading-tight">Choose how frames behave between updates.</span>
+                            <span className="text-[11px] font-medium text-neutral-100">Strobe Style</span>
+                            <span className="text-[10px] font-medium text-neutral-300 leading-tight">Choose how frames behave between updates.</span>
                           </div>
                           <select
                             value={settings.strobeMode}
@@ -4796,7 +4903,7 @@ export default function TrackingCanvas() {
                               const val = e.target.value as 'freeze' | 'flash';
                               setSettings((prev) => ({ ...prev, strobeMode: val }));
                             }}
-                            className="bg-neutral-800 text-[11px] text-neutral-200 border border-neutral-700 px-2 py-1.5 rounded-md outline-none cursor-pointer focus:border-blue-500 transition-all"
+                            className="bg-neutral-800 text-[11px] text-white border border-neutral-700 px-2 py-1.5 rounded-md outline-none cursor-pointer focus:border-blue-500 transition-all"
                           >
                             <option value="freeze">Freeze Frame (Posterize)</option>
                             <option value="flash">Blackout Flash (Strobe Light)</option>
@@ -4808,10 +4915,10 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400">Rainbow Color Cycle</span>
-                          <span className="text-[10px] text-neutral-500">Continuously shifts the hue of the trail over time.</span>
+                          <span className="text-neutral-200">Rainbow Color Cycle</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Continuously shifts the hue of the trail over time.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">
+                        <span className="text-white font-mono shrink-0 text-right">
                           {settings.colorCycleSpeed === 0 ? 'Off' : `${settings.colorCycleSpeed} deg/f`}
                         </span>
                       </div>
@@ -4831,10 +4938,10 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400">Fluid Smoke (Vertical Drift)</span>
-                          <span className="text-[10px] text-neutral-500">Makes the trail float upwards or downwards.</span>
+                          <span className="text-neutral-200">Fluid Smoke (Vertical Drift)</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Makes the trail float upwards or downwards.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">{settings.verticalDrift} px/f</span>
+                        <span className="text-white font-mono shrink-0 text-right">{settings.verticalDrift} px/f</span>
                       </div>
                       <input
                         type="range"
@@ -4852,10 +4959,10 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400">Fluid Smoke (Horizontal Drift)</span>
-                          <span className="text-[10px] text-neutral-500">Makes the trail drift left or right.</span>
+                          <span className="text-neutral-200">Fluid Smoke (Horizontal Drift)</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Makes the trail drift left or right.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">{settings.horizontalDrift} px/f</span>
+                        <span className="text-white font-mono shrink-0 text-right">{settings.horizontalDrift} px/f</span>
                       </div>
                       <input
                         type="range"
@@ -4873,13 +4980,13 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-2 mb-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400 flex items-center gap-1.5">
-                            <Maximize2 className="w-3.5 h-3.5 text-neutral-400/80" />
+                          <span className="text-neutral-200 flex items-center gap-1.5">
+                            <Maximize2 className="w-3.5 h-3.5 text-neutral-200/80" />
                             Feedback Loop (Zoom)
                           </span>
-                          <span className="text-[10px] text-neutral-500">Scales the trail up/down for an infinite zoom.</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Scales the trail up/down for an infinite zoom.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">
+                        <span className="text-white font-mono shrink-0 text-right">
                           {settings.feedbackZoom === 1.0 ? 'Off' : `${((settings.feedbackZoom - 1) * 100).toFixed(1)}%`}
                         </span>
                       </div>
@@ -4899,10 +5006,10 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-2 mb-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400">Motion Blur</span>
-                          <span className="text-[10px] text-neutral-500">Accumulates camera frames for a smooth ribbon effect.</span>
+                          <span className="text-neutral-200">Motion Blur</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Accumulates camera frames for a smooth ribbon effect.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">
+                        <span className="text-white font-mono shrink-0 text-right">
                           {settings.motionBlur === 0 ? 'Off' : `${(settings.motionBlur * 100).toFixed(0)}%`}
                         </span>
                       </div>
@@ -4928,7 +5035,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
                     <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
                       <Sliders className="w-4 h-4 text-blue-400" />
-                      <h3 className="font-sans font-semibold text-sm text-neutral-200">
+                      <h3 className="font-sans font-semibold text-sm text-white">
                         Advanced Settings
                       </h3>
                     </div>
@@ -4936,10 +5043,10 @@ export default function TrackingCanvas() {
                     <div className="flex flex-col gap-1.5 mt-1 mb-2">
                       <div className="flex justify-between text-xs">
                         <div className="flex flex-col">
-                          <span className="text-neutral-400">Background Adaptation</span>
-                          <span className="text-[10px] text-neutral-500">How quickly the camera learns changes in the background.</span>
+                          <span className="text-neutral-200">Background Adaptation</span>
+                          <span className="text-[10px] font-medium text-neutral-300">How quickly the camera learns changes in the background.</span>
                         </div>
-                        <span className="text-neutral-200 font-mono shrink-0 text-right">{(settings.bgLearningRate * 100).toFixed(0)}%</span>
+                        <span className="text-white font-mono shrink-0 text-right">{(settings.bgLearningRate * 100).toFixed(0)}%</span>
                       </div>
                       <input
                         type="range"
@@ -4952,7 +5059,7 @@ export default function TrackingCanvas() {
                         }
                         className="w-full accent-blue-500 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer"
                       />
-                      <div className="flex justify-between text-[10px] text-neutral-500 px-1 mt-1">
+                      <div className="flex justify-between text-[10px] font-medium text-neutral-300 px-1 mt-1">
                         <span>Stable</span>
                         <span>Fast Update</span>
                       </div>
@@ -4960,10 +5067,10 @@ export default function TrackingCanvas() {
 
                     {/* Debug and audio settings */}
                     <div className="flex flex-col gap-3 pt-1">
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                         <div className="flex flex-col">
                           <span>Invert Tracked Colors</span>
-                          <span className="text-[10px] text-neutral-500">Creates a negative trail effect</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Creates a negative trail effect</span>
                         </div>
                         <input
                           type="checkbox"
@@ -4976,10 +5083,10 @@ export default function TrackingCanvas() {
                         <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
                       </label>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                         <div className="flex flex-col">
                           <span>Show Debug Mask</span>
-                          <span className="text-[10px] text-neutral-500">Visualizes what camera currently extracts</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Visualizes what camera currently extracts</span>
                         </div>
                         <input
                           type="checkbox"
@@ -4992,10 +5099,10 @@ export default function TrackingCanvas() {
                         <div className="relative w-8 h-4 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-neutral-400 after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-neutral-950" />
                       </label>
 
-                      <label className="flex items-center justify-between text-xs text-neutral-300 cursor-pointer select-none">
+                      <label className="flex items-center justify-between text-xs text-neutral-100 cursor-pointer select-none">
                         <div className="flex flex-col">
                           <span>Record Audio Stream</span>
-                          <span className="text-[10px] text-neutral-500">Syncs background mic on export</span>
+                          <span className="text-[10px] font-medium text-neutral-300">Syncs background mic on export</span>
                         </div>
                         <input
                           type="checkbox"

@@ -46,7 +46,10 @@ export interface TrackingSettings {
   cloneStampBrushSize: number;
   cloneStampFeather: number;
   enablePoiMode: boolean;
-  poiPatternType: 'rainbow' | 'flowers' | 'spiral' | 'chevron' | 'mandala' | 'plasma' | 'starburst' | 'plaid' | 'wave';
+  poiPatternType: 'rainbow' | 'flowers' | 'spiral' | 'chevron' | 'mandala' | 'plasma' | 'starburst' | 'plaid' | 'wave' | 'swedish' | 'text' | 'custom';
+  poiText: string;
+  poiTextColor: string;
+  poiCustomImage: string | null;
   poiHeight: number;
   poiWidth: number;
   poiOrientation: 'vertical' | 'horizontal' | 'motion' | 'radial' | 'club';
@@ -72,5 +75,16 @@ export interface TrackingSettings {
   poiGlowRadius: number;            // Radius of the glow halo in pixels (e.g., 8)
   poiGlowIntensity: number;         // Glow brightness multiplier 0.0–1.0
   poiLedCount: number;              // Override number of simulated LEDs per column (0 = auto from club length)
+  // === STAMP OVERLAY FIELDS ===
+  stampEnabled: boolean;             // Toggle the stamp reveal overlay
+  stampSource: 'text' | 'image';    // Whether stamp content comes from text or uploaded image
+  stampRevealRadius: number;         // Pixel radius around club that reveals stamp pixels
+  stampRevealStrength: number;       // Opacity added per club pass (0.0–1.0)
+  stampMaxOpacity: number;           // Cap on reveal opacity (prevents solid look)
+  stampFadeDelay: number;            // Milliseconds before fade-out starts after last club touch
+  stampFadeRate: number;             // Opacity decay per frame during fade-out
+  stampX: number;                    // Stamp center X position (0–1 normalized)
+  stampY: number;                    // Stamp center Y position (0–1 normalized)
+  stampScale: number;                // Scale factor for the stamp
 }
 
