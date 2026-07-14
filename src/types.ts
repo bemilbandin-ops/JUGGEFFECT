@@ -46,7 +46,7 @@ export interface TrackingSettings {
   cloneStampBrushSize: number;
   cloneStampFeather: number;
   enablePoiMode: boolean;
-  poiPatternType: 'rainbow' | 'flowers' | 'spiral' | 'chevron' | 'mandala' | 'plasma' | 'starburst' | 'plaid' | 'wave' | 'swedish' | 'text' | 'custom';
+  poiPatternType: 'rainbow' | 'flowers' | 'spiral' | 'chevron' | 'mandala' | 'plasma' | 'starburst' | 'plaid' | 'wave' | 'text' | 'custom';
   poiText: string;
   poiTextColor: string;
   poiCustomImage: string | null;

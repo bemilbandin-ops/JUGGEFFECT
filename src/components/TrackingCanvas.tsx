@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, MouseEvent, useMemo } from 'react';
+import React, { useRef, useEffect, useState, MouseEvent, useMemo, useCallback } from 'react';
 import {
   Camera,
   Play,
@@ -154,10 +154,12 @@ function getLedSprite(
   glowIntensity: number,
   dotWidth: number
 ): HTMLCanvasElement {
-  const roundedR = r - (r % 4);
-  const roundedG = g - (g % 4);
-  const roundedB = b - (b % 4);
-  const roundedA = a - (a % 8);
+  // Round colors to multiples of 16 and alpha to 32 to maximize cache hits
+  // and prevent garbage collection overhead from recreating canvases.
+  const roundedR = r - (r % 16);
+  const roundedG = g - (g % 16);
+  const roundedB = b - (b % 16);
+  const roundedA = a - (a % 32);
   const key = `${roundedR},${roundedG},${roundedB},${roundedA},${glowEnabled ? 1 : 0},${glowRadius},${glowIntensity},${dotWidth}`;
   
   let sprite = ledSpriteCache.get(key);
@@ -216,15 +218,7 @@ function drawLedColumnWithGlow(
   const data = imgData.data;
   const px = colIdx % pWidth;
 
-  // Use 'lighter' composite for additive glow blending
-  const prevComposite = ctx.globalCompositeOperation;
-  if (glowEnabled) {
-    ctx.globalCompositeOperation = 'lighter';
-  }
-
-  // Set globalAlpha to scale the sprites' opacity correctly
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalAlpha = opacity;
+  // composite operation and alpha are managed by the caller for performance
 
   for (let i = 0; i < numLEDs; i++) {
     const y_ratio = numLEDs > 1 ? i / (numLEDs - 1) : 0.5;
@@ -232,10 +226,19 @@ function drawLedColumnWithGlow(
 
     const py = Math.floor(y_ratio * (pHeight - 1));
     const idx = (py * pWidth + px) * 4;
+    
+    if (isNaN(idx) || idx < 0 || idx >= data.length) {
+      continue;
+    }
+
     const r = data[idx];
     const g = data[idx + 1];
     const b = data[idx + 2];
     const a = data[idx + 3];
+
+    if (r === undefined || g === undefined || b === undefined || a === undefined || isNaN(r) || isNaN(g) || isNaN(b) || isNaN(a)) {
+      continue;
+    }
 
     if (a <= 15) continue;
 
@@ -244,9 +247,6 @@ function drawLedColumnWithGlow(
     ctx.drawImage(sprite, -size / 2, y_pos - size / 2);
   }
 
-  // Restore composite mode and global alpha
-  ctx.globalCompositeOperation = prevComposite;
-  ctx.globalAlpha = prevAlpha;
 }
 
 function updatePoiPattern(
@@ -482,6 +482,8 @@ const ACTIVE_EFFECTS_META: SettingDisplayMeta[] = [
   { key: 'enableLightTracking', label: 'Light Tracking', type: 'boolean', condition: s => s.enableTrails, tab: 'trails' },
   { key: 'enablePoiMode', label: 'Pixel Mode', type: 'boolean', condition: s => s.enableTrails, tab: 'poi' },
   { key: 'stampEnabled', label: 'Stamp Overlay', type: 'boolean', tab: 'paint' },
+  { key: 'invertColors', label: 'Invert Tracked Colors', type: 'boolean', tab: 'camera' },
+  { key: 'showDebugFeed', label: 'Show Debug Mask', type: 'boolean', tab: 'camera' },
 
   // Trails Settings
   { key: 'motionThreshold', label: 'Motion Threshold', type: 'slider', min: 1, max: 255, unit: '', condition: s => s.enableTrails && !s.enableLightTracking, tab: 'trails' },
@@ -495,6 +497,14 @@ const ACTIVE_EFFECTS_META: SettingDisplayMeta[] = [
   { key: 'horizontalDrift', label: 'Horizontal Drift', type: 'slider', min: -10, max: 10, unit: '', condition: s => s.enableTrails && s.horizontalDrift !== 0, tab: 'trails' },
   { key: 'strobeRate', label: 'Strobe Rate', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.strobeRate > 0, tab: 'trails' },
   { key: 'motionBlur', label: 'Motion Blur', type: 'slider', min: 0, max: 1.0, unit: '', condition: s => s.enableTrails && s.motionBlur > 0, tab: 'trails' },
+
+  // Camera Settings
+  { key: 'exposure', label: 'Exposure', type: 'slider', min: -100, max: 100, unit: '%', condition: s => s.exposure !== 0, tab: 'camera' },
+  { key: 'contrast', label: 'Contrast', type: 'slider', min: -100, max: 100, unit: '%', condition: s => s.contrast !== 0, tab: 'camera' },
+  { key: 'saturation', label: 'Saturation', type: 'slider', min: -100, max: 100, unit: '%', condition: s => s.saturation !== 0, tab: 'camera' },
+  { key: 'temperature', label: 'Temperature', type: 'slider', min: -100, max: 100, unit: '%', condition: s => s.temperature !== 0, tab: 'camera' },
+  { key: 'tint', label: 'Tint', type: 'slider', min: -100, max: 100, unit: '%', condition: s => s.tint !== 0, tab: 'camera' },
+  { key: 'bgLearningRate', label: 'Background Adaptation', type: 'slider', min: 0.01, max: 0.20, unit: '', condition: s => Math.abs(s.bgLearningRate - 0.05) > 0.001, tab: 'camera' },
 
   // Pixel POI Settings
   { key: 'poiPatternType', label: 'Pattern Source', type: 'select', condition: s => s.enableTrails && s.enablePoiMode, tab: 'poi' },
@@ -555,11 +565,7 @@ export default function TrackingCanvas() {
 
   const poiColumnIndexRef = useRef<number>(0);
   // POV trail buffer: stores painted column snapshots per tracked point
-  // Each entry: { id: trackingId, x, y, angle, colIdx, length, timestamp }
-  const poiTrailBufferRef = useRef<Map<number, { x: number; y: number; angle: number; colIdx: number; length: number; opacity: number; timestamp: number }[]>>(new Map());
-  // Track accumulated distance per tracked point (for per-pixel-distance column advancement)
-  const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
-  const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
+  const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; prevAngle?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
   const nextTrackedIdRef = useRef<number>(1);
 
   // React-controlled state
@@ -569,6 +575,8 @@ export default function TrackingCanvas() {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const isScrubbingRef = useRef<boolean>(false);
+  const lastSeekTimeRef = useRef<number>(0);
+  const pendingSeekTimeRef = useRef<number | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [videoSourceMode, setVideoSourceMode] = useState<'camera' | 'file'>('camera');
@@ -1135,7 +1143,13 @@ export default function TrackingCanvas() {
     const newTime = parseFloat(e.target.value);
     setCurrentTime(newTime);
     if (videoRef.current) {
-      videoRef.current.currentTime = newTime;
+      pendingSeekTimeRef.current = newTime;
+      const now = performance.now();
+      if (now - lastSeekTimeRef.current > 60) { // Seek at most once every 60ms to avoid freezing
+        videoRef.current.currentTime = newTime;
+        lastSeekTimeRef.current = now;
+        pendingSeekTimeRef.current = null;
+      }
     }
   };
 
@@ -1145,6 +1159,10 @@ export default function TrackingCanvas() {
 
   const handleScrubEnd = () => {
     isScrubbingRef.current = false;
+    if (videoRef.current && pendingSeekTimeRef.current !== null) {
+      videoRef.current.currentTime = pendingSeekTimeRef.current;
+      pendingSeekTimeRef.current = null;
+    }
   };
 
   const handleTogglePlay = () => {
@@ -1920,7 +1938,16 @@ export default function TrackingCanvas() {
           }
 
           // 2. Apply fade (only on strobe trigger to preserve trail persistence across intervals)
-          const fadeRate = currentSettings.echoFadeRate;
+          let fadeRate = currentSettings.echoFadeRate;
+          if (currentSettings.enablePoiMode && currentSettings.poiPovEnabled) {
+            const povRetention = currentSettings.poiPovRetention || 400;
+            const framesToFade = Math.max(1, povRetention / 16.6); // 60fps approx
+            // Calculate what fraction to remove each frame so that after `framesToFade` frames, 
+            // the opacity reaches 5% (exponential fade).
+            // For 'sharp', we use a much faster drop-off curve (target 0.1%).
+            const targetOpacity = currentSettings.poiPovFadeMode === 'sharp' ? 0.001 : 0.05;
+            fadeRate = 1 - Math.pow(targetOpacity, 1 / framesToFade);
+          }
           trailCtx.globalCompositeOperation = 'destination-out';
           trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
           trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
@@ -1979,7 +2006,7 @@ export default function TrackingCanvas() {
                 }
               }
 
-              const updatedTrackedPoints: { id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[] = [];
+              const updatedTrackedPoints: { id: number; x: number; y: number; prevX?: number; prevY?: number; prevAngle?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[] = [];
               const maxMatchDistance = 100;
 
               for (const blob of currentBlobs) {
@@ -2032,6 +2059,7 @@ export default function TrackingCanvas() {
                     y: blob.y,
                     prevX: bestMatch.x,
                     prevY: bestMatch.y,
+                    prevAngle: bestMatch.angle,
                     angle: newAngle,
                     length: newLength,
                     envelopeFrame: (bestMatch.envelopeFrame || 0) + 1,
@@ -2137,60 +2165,92 @@ export default function TrackingCanvas() {
                   }
 
                   if (usePov) {
-                    // === NEW POV MODE ===
-                    if (!poiTrailBufferRef.current.has(tp.id)) {
-                      poiTrailBufferRef.current.set(tp.id, []);
-                      poiAccumulatedDistRef.current.set(tp.id, 0);
+                    // === GAPLESS INTERPOLATION POV MODE ===
+                    const W = currentSettings.poiWidth;
+                    const orientation = currentSettings.poiOrientation;
+                    const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
+                    const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
+                    
+                    const prevX = tp.prevX !== undefined ? tp.prevX : tp.x;
+                    const prevY = tp.prevY !== undefined ? tp.prevY : tp.y;
+                    let prevAngle = tp.prevAngle !== undefined ? tp.prevAngle : tp.angle;
+                    
+                    // Unwrap previous angle so we take the shortest path when interpolating rotation
+                    let angleDiff = tp.angle - prevAngle;
+                    while (angleDiff < -Math.PI) { angleDiff += Math.PI * 2; prevAngle -= Math.PI * 2; }
+                    while (angleDiff > Math.PI) { angleDiff -= Math.PI * 2; prevAngle += Math.PI * 2; }
+                    
+                    // Determine how many steps to interpolate based on distance and rotation speed
+                    const distMoved = Math.hypot(tp.x - prevX, tp.y - prevY);
+                    const angleMoved = Math.abs(angleDiff);
+                    const columnSpacing = currentSettings.poiPovColumnSpacing || 3;
+                    
+                    // Base steps on translation and rotation
+                    let numSteps = Math.max(1, Math.ceil(distMoved / columnSpacing), Math.ceil(angleMoved / 0.15));
+                    if (numSteps > 15) numSteps = 15; // Cap lower to prevent FPS drops
+
+                    const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(finalL / 8));
+
+                    // We draw directly to trailCtx. The canvas `destination-out` fade handles the history!
+                    const prevComposite = trailCtx.globalCompositeOperation;
+                    if (glowEnabled) {
+                      trailCtx.globalCompositeOperation = 'lighter';
                     }
-                    const trail = poiTrailBufferRef.current.get(tp.id)!;
-                    const prevDist = poiAccumulatedDistRef.current.get(tp.id) || 0;
 
-                    if (motionMode === 'circular') {
-                      const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
-                      const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
-                      const angToCenter = Math.atan2(tp.y - cy, tp.x - cx);
-                      colIdx = Math.floor(((angToCenter + Math.PI) / (Math.PI * 2)) * patternWidth) % patternWidth;
-                      if (colIdx < 0) colIdx += patternWidth;
-                      trail.push({ x: tp.x, y: tp.y, angle: tp.angle, colIdx, length: finalL, opacity: finalOpacity, timestamp: now });
-                    } else {
-                      let distMoved = 0;
-                      if (tp.prevX !== undefined && tp.prevY !== undefined) {
-                        distMoved = Math.hypot(tp.x - tp.prevX, tp.y - tp.prevY);
-                      } else {
-                        // Ensure we paint immediately on the first tracked frame or after a tracker reset
-                        distMoved = columnSpacing;
+                    for (let step = 1; step <= numSteps; step++) {
+                      const t = step / numSteps;
+                      const interpX = prevX + (tp.x - prevX) * t;
+                      const interpY = prevY + (tp.y - prevY) * t;
+                      const interpAngle = prevAngle + angleDiff * t;
+                      
+                      // For time-based mapping, column index advances smoothly
+                      let stepColIdx = colIdx;
+                      const activeMappingMode = motionMode === 'circular' ? 'angle' : mappingMode;
+                    
+                      if (activeMappingMode === 'time') {
+                        stepColIdx = Math.floor(poiColumnIndexRef.current - currentSettings.poiSpeedMultiplier * (1 - t)) % patternWidth;
+                        if (stepColIdx < 0) stepColIdx += patternWidth;
+                      } else if (activeMappingMode === 'angle') {
+                        const normAngle = (interpAngle + Math.PI) / (Math.PI * 2);
+                        stepColIdx = Math.floor(normAngle * patternWidth) % patternWidth;
+                        if (stepColIdx < 0) stepColIdx += patternWidth;
                       }
-                      const newAccDist = prevDist + distMoved;
 
-                      if (newAccDist >= columnSpacing) {
-                        const columnsToAdvance = Math.floor(newAccDist / columnSpacing);
-                        const lastColIdx = trail.length > 0 ? trail[trail.length - 1].colIdx : colIdx;
-                        
-                        for (let step = 0; step < columnsToAdvance; step++) {
-                          const stepCol = (lastColIdx + step + 1) % patternWidth;
-                          const t_interp = columnsToAdvance > 1 ? (step + 1) / columnsToAdvance : 1;
-                          const interpX = tp.prevX !== undefined ? tp.prevX + (tp.x - tp.prevX) * t_interp : tp.x;
-                          const interpY = tp.prevY !== undefined ? tp.prevY + (tp.y - tp.prevY) * t_interp : tp.y;
-                          
-                          trail.push({
-                            x: interpX,
-                            y: interpY,
-                            angle: tp.angle,
-                            colIdx: stepCol,
-                            length: finalL,
-                            opacity: finalOpacity,
-                            timestamp: now
-                          });
+                      trailCtx.save();
+                      trailCtx.globalAlpha = finalOpacity;
+                      
+                      if (orientation === 'club') {
+                        trailCtx.translate(interpX, interpY);
+                        trailCtx.rotate(interpAngle);
+                      } else if (orientation === 'radial') {
+                        const rAngle = Math.atan2(interpY - cy, interpX - cx);
+                        trailCtx.translate(interpX, interpY);
+                        trailCtx.rotate(rAngle);
+                      } else if (orientation === 'motion') {
+                        let mAngle = 0;
+                        if (distMoved > 2) {
+                          mAngle = Math.atan2(tp.y - prevY, tp.x - prevX) + Math.PI / 2;
+                        } else {
+                          mAngle = interpAngle + Math.PI / 2;
                         }
-                        poiAccumulatedDistRef.current.set(tp.id, newAccDist % columnSpacing);
-                      } else {
-                        poiAccumulatedDistRef.current.set(tp.id, newAccDist);
+                        trailCtx.translate(interpX, interpY);
+                        trailCtx.rotate(mAngle);
+                      } else if (orientation === 'vertical') {
+                        trailCtx.translate(interpX, interpY);
+                      } else if (orientation === 'horizontal') {
+                        trailCtx.translate(interpX, interpY);
+                        trailCtx.rotate(Math.PI / 2);
                       }
-                    }
 
-                    while (trail.length > 500) {
-                      trail.shift();
+                      drawLedColumnWithGlow(
+                        trailCtx, imgData, stepColIdx, numLEDs, finalL, W,
+                        glowEnabled, glowRadius, glowIntensity, finalOpacity
+                      );
+                      
+                      trailCtx.restore();
                     }
+                    
+                    trailCtx.globalCompositeOperation = prevComposite;
                   } else {
                     // === LEGACY MODE (original single-column painting) ===
                     const renderMode = currentSettings.poiRenderMode || 'dots';
@@ -2322,73 +2382,6 @@ export default function TrackingCanvas() {
                     }
 
                     trailCtx.restore();
-                  }
-                }
-
-                // 2. Render all visible trails in the buffer (POV mode)
-                if (usePov) {
-                  const W = currentSettings.poiWidth;
-                  const orientation = currentSettings.poiOrientation;
-
-                  for (const [id, trail] of poiTrailBufferRef.current) {
-                    // Evict old entries
-                    const cutoff = now - povRetention;
-                    while (trail.length > 0 && trail[0].timestamp < cutoff) {
-                      trail.shift();
-                    }
-
-                    if (trail.length === 0) {
-                      poiTrailBufferRef.current.delete(id);
-                      poiAccumulatedDistRef.current.delete(id);
-                      continue;
-                    }
-
-                    for (const entry of trail) {
-                      const age = now - entry.timestamp;
-                      let fadeFactor = 1.0;
-                      if (povFadeMode === 'linear') {
-                        fadeFactor = 1.0 - (age / povRetention);
-                      } else if (povFadeMode === 'exponential') {
-                        fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
-                      } else if (povFadeMode === 'sharp') {
-                        fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
-                      }
-                      fadeFactor = Math.max(0, Math.min(1, fadeFactor));
-                      const entryOpacity = entry.opacity * fadeFactor;
-                      if (entryOpacity <= 0.01) continue;
-
-                      // Draw the column at this trail entry's position/angle
-                      trailCtx.save();
-                      trailCtx.globalAlpha = entryOpacity;
-
-                      if (orientation === 'club') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(entry.angle);
-                      } else if (orientation === 'radial') {
-                        const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
-                        const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
-                        const angle = Math.atan2(entry.y - cy, entry.x - cx);
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(angle);
-                      } else if (orientation === 'motion') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(entry.angle + Math.PI / 2);
-                      } else if (orientation === 'vertical') {
-                        trailCtx.translate(entry.x, entry.y);
-                      } else if (orientation === 'horizontal') {
-                        trailCtx.translate(entry.x, entry.y);
-                        trailCtx.rotate(Math.PI / 2);
-                      }
-
-                      const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
-
-                      drawLedColumnWithGlow(
-                        trailCtx, imgData, entry.colIdx, numLEDs, entry.length, W,
-                        glowEnabled, glowRadius, glowIntensity, entryOpacity
-                      );
-
-                      trailCtx.restore();
-                    }
                   }
                 }
               }
@@ -2626,8 +2619,9 @@ export default function TrackingCanvas() {
 
   // Formatter for recorded time
   function formatTime(seconds: number): string {
+    if (isNaN(seconds) || seconds < 0) return '00:00';
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   }
 
@@ -3018,21 +3012,22 @@ export default function TrackingCanvas() {
                 </div>
               </div>
 
-              {/* Playback Control Bar */}
+              {/* Playback & Recording Control Bar (File Mode) */}
               {videoSourceMode === 'file' && cameraActive && (
-                <div className="absolute bottom-24 left-1/2 -translate-x-1/2 w-[90vw] max-w-2xl bg-neutral-900/90 backdrop-blur-md border border-neutral-800 rounded-lg p-3 flex flex-col gap-2 pointer-events-auto shadow-2xl z-20">
+                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[90vw] max-w-2xl bg-neutral-900/95 backdrop-blur-md border border-neutral-800 rounded-lg p-3 flex flex-col gap-3 pointer-events-auto shadow-2xl z-20">
+                  {/* First row: Playback Scrubber */}
                   <div className="flex items-center gap-3">
                     {/* Play/Pause Button */}
                     <button
                       onClick={handleTogglePlay}
-                      className="p-2 rounded-lg text-neutral-100 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+                      className="p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
                       title={isPaused ? "Play" : "Pause"}
                     >
                       {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
                     </button>
 
                     {/* Time Display */}
-                    <span className="text-[11px] font-mono text-neutral-200 select-none shrink-0">
+                    <span className="text-[11px] font-mono text-neutral-400 select-none shrink-0">
                       {formatTime(currentTime)} / {formatTime(duration)}
                     </span>
 
@@ -3048,66 +3043,115 @@ export default function TrackingCanvas() {
                       onTouchStart={handleScrubStart}
                       onMouseUp={handleScrubEnd}
                       onTouchEnd={handleScrubEnd}
-                      className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-neutral-800 appearance-none cursor-pointer hover:bg-neutral-750 transition-all [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+                      className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-neutral-850 appearance-none cursor-pointer hover:bg-neutral-800 transition-all [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
                     />
 
                     {/* Clear Trails Button */}
                     <button
                       onClick={handleClearTrails}
-                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-100 px-2.5 py-1 rounded text-[11px] font-medium transition-all active:scale-95 border border-neutral-750 flex items-center gap-1.5 cursor-pointer shrink-0"
+                      className="bg-neutral-805 hover:bg-neutral-750 text-neutral-300 px-2.5 py-1 rounded text-[11px] font-medium transition-all active:scale-95 border border-neutral-750 flex items-center gap-1.5 cursor-pointer shrink-0"
                       title="Clear existing trails"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Reset Trails</span>
                     </button>
                   </div>
+
+                  {/* Second row: Recording & Debug Controls */}
+                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-neutral-850/60">
+                    <div className="flex-1 flex justify-center">
+                      {isRecording ? (
+                        <button
+                          onClick={stopRecording}
+                          className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all"
+                        >
+                          <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
+                          <span>Stop ({formatTime(recordingSeconds)})</span>
+                        </button>
+                      ) : !exportConfigured ? (
+                        <button
+                          onClick={() => setShowExportModal(true)}
+                          className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white active:scale-95 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all border border-amber-500/30"
+                          title="Configure Export Settings"
+                        >
+                          <Sliders className="w-3.5 h-3.5 font-sans" />
+                          <span className="font-sans">Configure Export Quality First</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={startRecording}
+                            className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10 font-sans"
+                          >
+                            <Play className="w-3 h-3 fill-current" />
+                            <span>Record Overlay</span>
+                          </button>
+                          <button
+                            onClick={() => setShowExportModal(true)}
+                            className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
+                            title="Adjust Export Quality Settings"
+                          >
+                            <Sliders className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {settings.showDebugFeed && (
+                      <div className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono flex items-center gap-1 shrink-0">
+                        <Eye className="w-3 h-3" /> Debug
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* Bottom control bar (Recording controls) */}
-              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-900 px-4 py-2 rounded border border-neutral-800 pointer-events-auto shadow-2xl z-20">
-                {isRecording ? (
-                  <button
-                    onClick={stopRecording}
-                    className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all"
-                  >
-                    <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
-                    <span>Stop ({formatTime(recordingSeconds)})</span>
-                  </button>
-                ) : !exportConfigured ? (
-                  <button
-                    onClick={() => setShowExportModal(true)}
-                    className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white active:scale-95 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all border border-amber-500/30"
-                    title="Configure Export Settings"
-                  >
-                    <Sliders className="w-3.5 h-3.5 font-sans" />
-                    <span className="font-sans">Configure Export Quality First</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-1.5">
+              {/* Bottom control bar (Recording controls - Camera Mode Only) */}
+              {videoSourceMode !== 'file' && cameraActive && (
+                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-neutral-900 px-4 py-2 rounded border border-neutral-800 pointer-events-auto shadow-2xl z-20">
+                  {isRecording ? (
                     <button
-                      onClick={startRecording}
-                      className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10 font-sans"
+                      onClick={stopRecording}
+                      className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all"
                     >
-                      <Play className="w-3 h-3 fill-current" />
-                      <span>Record Overlay</span>
+                      <span className="w-2.5 h-2.5 bg-white rounded-full animate-pulse" />
+                      <span>Stop ({formatTime(recordingSeconds)})</span>
                     </button>
+                  ) : !exportConfigured ? (
                     <button
                       onClick={() => setShowExportModal(true)}
-                      className="bg-neutral-800 hover:bg-neutral-700 text-neutral-100 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
-                      title="Adjust Export Quality Settings"
+                      className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white active:scale-95 py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all border border-amber-500/30"
+                      title="Configure Export Settings"
                     >
-                      <Sliders className="w-3.5 h-3.5" />
+                      <Sliders className="w-3.5 h-3.5 font-sans" />
+                      <span className="font-sans">Configure Export Quality First</span>
                     </button>
-                  </div>
-                )}
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={startRecording}
+                        className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-4 rounded-full font-medium text-xs flex items-center gap-2 transition-all shadow-lg shadow-blue-500/10 font-sans"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>Record Overlay</span>
+                      </button>
+                      <button
+                        onClick={() => setShowExportModal(true)}
+                        className="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 p-1.5 rounded-full border border-neutral-750 active:scale-95 transition-all"
+                        title="Adjust Export Quality Settings"
+                      >
+                        <Sliders className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
-                {settings.showDebugFeed && (
-                  <div className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-md font-mono flex items-center gap-1">
-                    <Eye className="w-3.5 h-3.5" /> Debug Mask
-                  </div>
-                )}
-              </div>
+                  {settings.showDebugFeed && (
+                    <div className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-md font-mono flex items-center gap-1">
+                      <Eye className="w-3.5 h-3.5" /> Debug Mask
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -3344,7 +3388,7 @@ export default function TrackingCanvas() {
 
       {/* 3. Pro Mode Mobile Tuner Overlay (only visible when camera is active and sidebar is closed) */}
       {cameraActive && !isSidebarOpen && (
-        <div className="absolute bottom-28 left-4 right-4 z-20 pointer-events-none flex flex-col items-center gap-3 md:hidden">
+        <div className={`absolute ${videoSourceMode === 'file' ? 'bottom-40' : 'bottom-28'} left-4 right-4 z-20 pointer-events-none flex flex-col items-center gap-3 md:hidden`}>
           <AnimatePresence>
             {activeTunerKey && (() => {
               const item = tunerSettings.find(s => s.key === activeTunerKey);
