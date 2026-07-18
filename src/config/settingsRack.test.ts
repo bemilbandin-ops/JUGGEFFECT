@@ -5,7 +5,7 @@ import {
   searchSettingKeys,
   SETTING_DEFINITIONS,
 } from './settingsRack';
-import { sectionSummary, type SettingsRackProps } from '../components/settings/SettingsRack';
+import { getRackStatusLabel, sectionSummary, type SettingsRackProps } from '../components/settings/SettingsRack';
 import { joinAriaIds } from '../components/settings/SettingRow';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -53,6 +53,10 @@ assert(sectionSummary.export(summarySettings) === '60 fps, ultra quality', 'expo
 
 assert(joinAriaIds('existing-label', 'setting-label') === 'existing-label setting-label', 'ARIA labels must preserve existing IDs');
 assert(joinAriaIds(undefined, 'setting-description', 'disabled-reason') === 'setting-description disabled-reason', 'ARIA descriptions must include the disabled reason');
+
+assert(getRackStatusLabel(DEFAULT_TRACKING_SETTINGS, null) === null, 'defaults must not be marked modified');
+assert(getRackStatusLabel(changed, null) === 'Modified', 'changed settings without a preset must be marked modified');
+assert(getRackStatusLabel(changed, 'cascade') === null, 'an active preset must not be marked modified');
 
 const sectionControls: SettingsRackProps['sectionControls'] = {
   tracking: null,
