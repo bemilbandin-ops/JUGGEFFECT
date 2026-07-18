@@ -38,8 +38,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { HSV, TrackingSettings } from '../types';
 import { DEFAULT_TRACKING_SETTINGS, QUICK_PRESETS } from '../config/settingsDefaults';
+import { sanitizeSettings, SETTING_DEFINITIONS, type SettingSectionId } from '../config/settingsRack';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
+import { applySettingsPatch, undoSettings } from '../utils/settingsActions';
 import {
   createPovProjectionState,
   samplePovColumns,
@@ -446,8 +448,7 @@ export default function TrackingCanvas() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // Merge with DEFAULT_TRACKING_SETTINGS to ensure any newly added setting fields exist
-          return { ...DEFAULT_TRACKING_SETTINGS, ...parsed };
+          return sanitizeSettings(parsed);
         } catch (e) {
           console.error('Failed to parse saved settings:', e);
         }
@@ -455,6 +456,9 @@ export default function TrackingCanvas() {
     }
     return DEFAULT_TRACKING_SETTINGS;
   });
+  const undoStackRef = useRef<TrackingSettings[]>([]);
+  const settingsGestureStartRef = useRef<TrackingSettings | null>(null);
+  const settingsGestureChangedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -501,6 +505,57 @@ export default function TrackingCanvas() {
   const [appliedPresetId, setAppliedPresetId] = useState<string | null>(null);
   const [geminiCollapsed, setGeminiCollapsed] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'presets' | 'trails' | 'poi' | 'camera' | 'paint'>('presets');
+
+  const changeSettings = (patch: Partial<TrackingSettings>) => {
+    setSettings((current) => {
+      const snapshot = applySettingsPatch(current, patch);
+      if (settingsGestureStartRef.current) {
+        settingsGestureChangedRef.current = true;
+      } else {
+        undoStackRef.current = [...undoStackRef.current.slice(-49), snapshot.previous];
+      }
+      return snapshot.next;
+    });
+    setAppliedPresetId(null);
+    setAppliedOption(null);
+  };
+
+  const beginSettingsGesture = () => {
+    settingsGestureStartRef.current = settingsRef.current;
+    settingsGestureChangedRef.current = false;
+  };
+
+  const endSettingsGesture = () => {
+    const previous = settingsGestureStartRef.current;
+    if (previous && settingsGestureChangedRef.current) {
+      undoStackRef.current = [...undoStackRef.current.slice(-49), previous];
+    }
+    settingsGestureStartRef.current = null;
+    settingsGestureChangedRef.current = false;
+  };
+
+  const undoLastSettingsChange = () => {
+    const previous = undoStackRef.current.at(-1);
+    if (!previous) return;
+    setSettings((current) => undoSettings(current, previous));
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    setAppliedPresetId(null);
+    setAppliedOption(null);
+  };
+
+  const resetSetting = (key: keyof TrackingSettings) => {
+    changeSettings({ [key]: DEFAULT_TRACKING_SETTINGS[key] } as Partial<TrackingSettings>);
+  };
+
+  const resetSection = (section: SettingSectionId) => {
+    const patch = {} as Partial<TrackingSettings>;
+    for (const key of Object.keys(SETTING_DEFINITIONS) as (keyof TrackingSettings)[]) {
+      if (SETTING_DEFINITIONS[key].section === section) {
+        Object.assign(patch, { [key]: DEFAULT_TRACKING_SETTINGS[key] });
+      }
+    }
+    changeSettings(patch);
+  };
 
   const hasEnvApiKey = !!(import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY);
 
@@ -574,52 +629,30 @@ export default function TrackingCanvas() {
   };
 
   const applyRecommendedSettings = (recSettings: Partial<TrackingSettings>, option: 'A' | 'B') => {
-    setSettings((prev) => {
-      let base = originalSettings;
-      if (!base) {
-        base = prev;
-        setOriginalSettings(prev);
-      }
-      return {
-        ...base,
-        ...recSettings,
-      };
-    });
+    const base = originalSettings ?? settingsRef.current;
+    if (!originalSettings) setOriginalSettings(base);
+    changeSettings({ ...base, ...recSettings });
     setAppliedOption(option);
-    setAppliedPresetId(null); // Clear preset selection if AI is used
   };
 
   const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
-    setSettings((prev) => {
-      let base = originalSettings;
-      if (!base) {
-        base = prev;
-        setOriginalSettings(prev);
-      }
-      return {
-        ...base,
-        ...presetSettings,
-      };
-    });
+    const base = originalSettings ?? settingsRef.current;
+    if (!originalSettings) setOriginalSettings(base);
+    changeSettings({ ...base, ...presetSettings });
     setAppliedPresetId(presetId);
-    setAppliedOption(null); // Clear Gemini option applied state
   };
 
   const resetToOriginalSettings = () => {
     if (originalSettings) {
-      setSettings(originalSettings);
+      changeSettings(originalSettings);
       setOriginalSettings(null);
-      setAppliedOption(null);
-      setAppliedPresetId(null);
     }
   };
 
   const resetToFactoryDefaults = () => {
     if (window.confirm('Are you sure you want to reset all settings to defaults? This will clear your custom tweaks.')) {
-      setSettings(DEFAULT_TRACKING_SETTINGS);
+      changeSettings(DEFAULT_TRACKING_SETTINGS);
       setOriginalSettings(null);
-      setAppliedOption(null);
-      setAppliedPresetId(null);
       try {
         localStorage.removeItem('juggeffect_tracking_settings');
       } catch (e) {

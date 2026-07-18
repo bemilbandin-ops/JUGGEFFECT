@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/utils/pov.test.ts && tsx src/config/settingsDefaults.test.ts && tsx src/config/settingsRack.test.ts"
+    "test": "tsx src/utils/pov.test.ts && tsx src/config/settingsDefaults.test.ts && tsx src/config/settingsRack.test.ts && tsx src/utils/settingsActions.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
