@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { DEFAULT_TRACKING_SETTINGS, QUICK_PRESETS } from '../../config/settingsDefaults';
 import {
   getChangedSettingKeys,
@@ -12,6 +12,7 @@ import { EffectSection } from './EffectSection';
 
 interface SettingsRackProps {
   settings: TrackingSettings;
+  sectionControls: Record<SettingSectionId, ReactNode>;
   canUndo: boolean;
   onChange: (patch: Partial<TrackingSettings>) => void;
   onUndo: () => void;
@@ -41,7 +42,7 @@ function formatValue(value: TrackingSettings[keyof TrackingSettings]) {
   return value === null ? 'None' : value === '' ? 'Empty' : String(value);
 }
 
-export function SettingsRack({ settings, canUndo, onChange, onUndo, onResetAll, onApplyPreset }: SettingsRackProps) {
+export function SettingsRack({ settings, sectionControls, canUndo, onChange, onUndo, onResetAll, onApplyPreset }: SettingsRackProps) {
   const [search, setSearch] = useState('');
   const [showPresets, setShowPresets] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
@@ -130,7 +131,7 @@ export function SettingsRack({ settings, canUndo, onChange, onUndo, onResetAll, 
             summary={sectionSummary[section](settings)}
             defaultOpen={section === 'tracking'}
           >
-            <p className="text-sm text-neutral-500">Controls for {sectionTitle[section].toLowerCase()} stay in the current panel until the rack is integrated.</p>
+            {sectionControls[section]}
           </EffectSection>
         </div>
       ))}

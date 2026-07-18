@@ -5,7 +5,8 @@ import {
   searchSettingKeys,
   SETTING_DEFINITIONS,
 } from './settingsRack';
-import { sectionSummary } from '../components/settings/SettingsRack';
+import { sectionSummary, type SettingsRackProps } from '../components/settings/SettingsRack';
+import { joinAriaIds } from '../components/settings/SettingRow';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -49,5 +50,18 @@ assert(sectionSummary.pixel(summarySettings) === 'spiral pattern, dots', 'pixel 
 assert(sectionSummary.paint(summarySettings) === '24px brush, 8px softness', 'paint summary must reflect brush settings');
 assert(sectionSummary.camera(summarySettings) === '+10% exposure, -20% saturation', 'camera summary must omit neutral controls');
 assert(sectionSummary.export(summarySettings) === '60 fps, ultra quality', 'export summary must reflect output settings');
+
+assert(joinAriaIds('existing-label', 'setting-label') === 'existing-label setting-label', 'ARIA labels must preserve existing IDs');
+assert(joinAriaIds(undefined, 'setting-description', 'disabled-reason') === 'setting-description disabled-reason', 'ARIA descriptions must include the disabled reason');
+
+const sectionControls: SettingsRackProps['sectionControls'] = {
+  tracking: null,
+  trails: null,
+  pixel: null,
+  paint: null,
+  camera: null,
+  export: null,
+};
+assert(Object.keys(sectionControls).length === 6, 'the rack must require controls for every section');
 
 console.log('✓ Settings rack catalog covers, searches, compares, and sanitizes settings');
