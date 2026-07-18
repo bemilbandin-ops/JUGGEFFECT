@@ -7,6 +7,7 @@ import {
 } from './settingsRack';
 import { getRackStatusLabel, sectionSummary, type SettingsRackProps } from '../components/settings/SettingsRack';
 import { joinAriaIds } from '../components/settings/SettingRow';
+import { formatSettingValue } from '../components/settings/SettingsSectionControls';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -26,6 +27,26 @@ const sanitized = sanitizeSettings({ blurAmount: 'bad', hueRotate: 180, unknown:
 assert(sanitized.blurAmount === DEFAULT_TRACKING_SETTINGS.blurAmount, 'invalid values must use defaults');
 assert(sanitized.hueRotate === 180, 'valid saved values must survive');
 assert(!('unknown' in sanitized), 'unknown saved keys must be discarded');
+
+const customImage = 'data:image/png;base64,abc';
+assert(sanitizeSettings({ poiCustomImage: customImage }).poiCustomImage === customImage, 'valid custom images must survive');
+assert(sanitizeSettings({ poiCustomImage: null }).poiCustomImage === null, 'null custom images must survive');
+
+const invalidSaved = sanitizeSettings({
+  compositeMode: 'invalid',
+  poiPatternType: 'invalid',
+  exportQuality: 'invalid',
+  motionThreshold: Number.NaN,
+  echoFadeRate: 2,
+  poiLedCount: 999,
+});
+assert(invalidSaved.compositeMode === DEFAULT_TRACKING_SETTINGS.compositeMode, 'invalid blend modes must use defaults');
+assert(invalidSaved.poiPatternType === DEFAULT_TRACKING_SETTINGS.poiPatternType, 'invalid pattern types must use defaults');
+assert(invalidSaved.exportQuality === DEFAULT_TRACKING_SETTINGS.exportQuality, 'invalid quality values must use defaults');
+assert(invalidSaved.motionThreshold === DEFAULT_TRACKING_SETTINGS.motionThreshold, 'non-finite numbers must use defaults');
+assert(invalidSaved.echoFadeRate === DEFAULT_TRACKING_SETTINGS.echoFadeRate, 'out-of-range fade values must use defaults');
+assert(invalidSaved.poiLedCount === DEFAULT_TRACKING_SETTINGS.poiLedCount, 'out-of-range LED counts must use defaults');
+assert(sanitizeSettings({ enableTrails: true, compositeMode: 'none' }).compositeMode === 'screen', 'enabled trails must use an active blend mode');
 
 const summarySettings = {
   ...DEFAULT_TRACKING_SETTINGS,
@@ -57,6 +78,8 @@ assert(joinAriaIds(undefined, 'setting-description', 'disabled-reason') === 'set
 assert(getRackStatusLabel(DEFAULT_TRACKING_SETTINGS, null) === null, 'defaults must not be marked modified');
 assert(getRackStatusLabel(changed, null) === 'Modified', 'changed settings without a preset must be marked modified');
 assert(getRackStatusLabel(changed, 'cascade') === null, 'an active preset must not be marked modified');
+assert(formatSettingValue('echoFadeRate', { ...DEFAULT_TRACKING_SETTINGS, echoFadeRate: 0.2 }) === '80% retention', 'trail readouts must be meaningful');
+assert(formatSettingValue('poiLedCount', { ...DEFAULT_TRACKING_SETTINGS, poiLedCount: 0 }) === 'Auto', 'automatic LED count must be named');
 
 const sectionControls: SettingsRackProps['sectionControls'] = {
   tracking: null,

@@ -95,14 +95,43 @@ export function getChangedSettingKeys(settings: TrackingSettings): (keyof Tracki
     .sort();
 }
 
+const numericRanges: Partial<Record<keyof TrackingSettings, readonly [number, number]>> = {
+  motionThreshold: [15, 120], lightThreshold: [0, 255], echoFadeRate: [0, 1], bgLearningRate: [.01, .2],
+  blurAmount: [0, 20], hueRotate: [0, 360], strobeRate: [0, 2], colorCycleSpeed: [0, 20],
+  verticalDrift: [-15, 15], horizontalDrift: [-15, 15], feedbackZoom: [.95, 1.1], motionBlur: [0, .95],
+  lineSmoothness: [0, 20], edgeAntiAliasing: [0, 500], exposure: [-100, 100], contrast: [-100, 100],
+  saturation: [-100, 100], temperature: [-100, 100], tint: [-100, 100], cloneStampOffsetX: [-500, 500],
+  cloneStampOffsetY: [-500, 500], cloneStampBrushSize: [5, 150], cloneStampFeather: [0, 100],
+  poiHeight: [0, 400], poiWidth: [1, 15], poiCenterRelativeX: [0, 1], poiCenterRelativeY: [0, 1],
+  poiSpeedMultiplier: [.2, 8], poiMaxPoints: [1, 5], poiOpacity: [.1, 1], poiFadeInTime: [0, 120],
+  poiHoldTime: [0, 120], poiFadeOutTime: [0, 120], poiWaitTime: [0, 120], poiFrameInterval: [1, 10],
+  poiPovRetention: [50, 2000], poiPovColumnSpacing: [1, 20], poiGlowRadius: [2, 20],
+  poiGlowIntensity: [.1, 1], poiLedCount: [0, 72],
+};
+
+const allowedValues: Partial<Record<keyof TrackingSettings, readonly unknown[]>> = {
+  compositeMode: ['none', 'screen', 'source-over', 'lighter', 'color-dodge'],
+  strobeMode: ['freeze', 'flash'], exportQuality: ['standard', 'medium', 'high', 'ultra'], exportFps: [30, 60],
+  poiPatternType: ['swedish', 'youtube', 'rainbow', 'flowers', 'text', 'custom', 'spiral', 'chevron', 'mandala'],
+  poiTextColor: ['#ff2a85', '#00ffcc', '#ffe600', '#3b82f6', '#ffffff'],
+  poiOrientation: ['vertical', 'horizontal', 'motion', 'radial', 'club'], poiMappingMode: ['time', 'angle', 'spatial'],
+  poiRenderMode: ['solid', 'dots'], poiPovFadeMode: ['linear', 'exponential', 'sharp'], poiPovMotionMode: ['free', 'circular'],
+};
+
 export function sanitizeSettings(saved: unknown): TrackingSettings {
   if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return { ...DEFAULT_TRACKING_SETTINGS };
   const source = saved as Record<string, unknown>;
   const result = { ...DEFAULT_TRACKING_SETTINGS } as Record<string, unknown>;
   for (const [key, defaultValue] of Object.entries(DEFAULT_TRACKING_SETTINGS)) {
     const value = source[key];
-    if (value === null && defaultValue === null) result[key] = value;
-    else if (typeof value === typeof defaultValue) result[key] = value;
+    if (key === 'poiCustomImage' && (value === null || typeof value === 'string')) result[key] = value;
+    else if (typeof value !== typeof defaultValue) continue;
+    else if (allowedValues[key as keyof TrackingSettings] && !allowedValues[key as keyof TrackingSettings]!.includes(value)) continue;
+    else if (typeof value === 'number') {
+      const range = numericRanges[key as keyof TrackingSettings];
+      if (Number.isFinite(value) && (!range || (value >= range[0] && value <= range[1]))) result[key] = value;
+    } else result[key] = value;
   }
+  if (result.enableTrails === true && result.compositeMode === 'none') result.compositeMode = 'screen';
   return result as unknown as TrackingSettings;
 }

@@ -420,6 +420,7 @@ export default function TrackingCanvas() {
   const lastSettingsStrRef = useRef<string>('');
   const trackedPointsRef = useRef<{ id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]>([]);
   const nextTrackedIdRef = useRef<number>(1);
+  const pixelSectionOpenRef = useRef(false);
 
   // React-controlled state
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -445,19 +446,20 @@ export default function TrackingCanvas() {
   // Settings state
   const [settings, setSettings] = useState<TrackingSettings>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('juggeffect_tracking_settings');
-      if (saved) {
-        try {
+      try {
+        const saved = localStorage.getItem('juggeffect_tracking_settings');
+        if (saved) {
           const parsed = JSON.parse(saved);
           return sanitizeSettings(parsed);
-        } catch (e) {
-          console.error('Failed to parse saved settings:', e);
         }
+      } catch (e) {
+        console.error('Failed to parse saved settings:', e);
       }
     }
     return DEFAULT_TRACKING_SETTINGS;
   });
   const undoStackRef = useRef<TrackingSettings[]>([]);
+  const [undoCount, setUndoCount] = useState(0);
   const settingsGestureStartRef = useRef<TrackingSettings | null>(null);
   const settingsGestureChangedRef = useRef(false);
 
@@ -473,6 +475,13 @@ export default function TrackingCanvas() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  const previousAudioSyncRef = useRef(settings.enableAudioSync);
+  useEffect(() => {
+    if (previousAudioSyncRef.current === settings.enableAudioSync) return;
+    previousAudioSyncRef.current = settings.enableAudioSync;
+    if (cameraActive) void startCamera();
+  }, [cameraActive, settings.enableAudioSync]);
 
 
 
@@ -512,6 +521,7 @@ export default function TrackingCanvas() {
       settingsGestureChangedRef.current = true;
     } else {
       undoStackRef.current = appendSettingsHistory(undoStackRef.current, snapshot.previous);
+      setUndoCount(undoStackRef.current.length);
     }
     settingsRef.current = snapshot.next;
     setSettings(snapshot.next);
@@ -528,6 +538,7 @@ export default function TrackingCanvas() {
     const previous = settingsGestureStartRef.current;
     if (previous && settingsGestureChangedRef.current) {
       undoStackRef.current = appendSettingsHistory(undoStackRef.current, previous);
+      setUndoCount(undoStackRef.current.length);
     }
     settingsGestureStartRef.current = null;
     settingsGestureChangedRef.current = false;
@@ -540,8 +551,10 @@ export default function TrackingCanvas() {
     settingsRef.current = next;
     setSettings(next);
     undoStackRef.current = undoStackRef.current.slice(0, -1);
+    setUndoCount(undoStackRef.current.length);
     setAppliedPresetId(null);
     setAppliedOption(null);
+    setOriginalSettings(null);
   };
 
   const resetSetting = (key: keyof TrackingSettings) => {
@@ -615,7 +628,6 @@ export default function TrackingCanvas() {
     setGeminiError(null);
     setGeminiAnalysisResult(null);
     setAppliedOption(null);
-    setOriginalSettings(null);
 
     try {
       const dataUrl = captureFrame();
@@ -640,15 +652,15 @@ export default function TrackingCanvas() {
   };
 
   const applyRecommendedSettings = (recSettings: Partial<TrackingSettings>, option: 'A' | 'B') => {
-    const base = originalSettings ?? settingsRef.current;
-    if (!originalSettings) setOriginalSettings(base);
+    const base = settingsRef.current;
+    setOriginalSettings(base);
     changeSettings({ ...base, ...recSettings });
     setAppliedOption(option);
   };
 
   const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
-    const base = originalSettings ?? settingsRef.current;
-    if (!originalSettings) setOriginalSettings(base);
+    const base = settingsRef.current;
+    setOriginalSettings(base);
     changeSettings({ ...base, ...presetSettings });
     setAppliedPresetId(presetId);
   };
@@ -780,13 +792,8 @@ export default function TrackingCanvas() {
       }
     });
     setSupportedMimeTypes(supported);
-    if (supported.length > 0) {
-      setSettings(prev => ({
-        ...prev,
-        exportMimeType: prev.exportMimeType || supported[0].mimeType
-      }));
-    }
   }, []);
+  const runtimeMimeType = settings.exportMimeType || supportedMimeTypes[0]?.mimeType || 'video/webm';
 
   // Initialize and list camera devices
   useEffect(() => {
@@ -961,6 +968,12 @@ export default function TrackingCanvas() {
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+  };
+
+  const handleClearPaintMask = () => {
+    const canvas = removalMaskCanvasRef.current;
+    const context = removalMaskCtxRef.current ?? canvas?.getContext('2d');
+    if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
   };
 
   // Start Camera Feed or Video File
@@ -1416,6 +1429,7 @@ export default function TrackingCanvas() {
 
         if (currentSettings.enablePoiMode && 
             currentSettings.poiOrientation === 'radial' && 
+            pixelSectionOpenRef.current &&
             !isRecordingRef.current) {
           const cx = currentSettings.poiCenterRelativeX * w;
           const cy = currentSettings.poiCenterRelativeY * h;
@@ -2251,6 +2265,7 @@ export default function TrackingCanvas() {
       // Draw Center of Rotation radial helper if enabled, in radial mode, and not exporting/recording
       if (currentSettings.enablePoiMode && 
           currentSettings.poiOrientation === 'radial' && 
+          pixelSectionOpenRef.current &&
           !isRecordingRef.current && 
           ctx) {
         const cx = currentSettings.poiCenterRelativeX * w;
@@ -2322,7 +2337,7 @@ export default function TrackingCanvas() {
       standard: 4000000, // 4 Mbps
     };
     const targetBitrate = bitrates[settings.exportQuality] || 15000000;
-    const selectedMime = settings.exportMimeType || 'video/webm';
+    const selectedMime = runtimeMimeType;
 
     const options = {
       mimeType: selectedMime,
@@ -2406,11 +2421,9 @@ export default function TrackingCanvas() {
         section={section}
         settings={settings}
         supportedMimeTypes={supportedMimeTypes}
+        effectiveMimeType={runtimeMimeType}
         onChange={changeSettings}
-        onAudioSyncChange={(enabled) => {
-          changeSettings({ enableAudioSync: enabled });
-          if (cameraActive) setTimeout(() => startCamera(), 100);
-        }}
+        onClearPaintMask={handleClearPaintMask}
         onGestureStart={beginSettingsGesture}
         onGestureEnd={endSettingsGesture}
       />,
@@ -2642,7 +2655,7 @@ export default function TrackingCanvas() {
                   <div className="bg-neutral-900/80 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-800/80 flex flex-col gap-1 text-[9px] font-mono text-neutral-400 w-fit">
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                      <span>Format: <span className="text-neutral-200 uppercase">{settings.exportMimeType ? (supportedMimeTypes.find(t => t.mimeType === settings.exportMimeType)?.ext || 'webm') : 'webm'}</span></span>
+                      <span>Format: <span className="text-neutral-200 uppercase">{supportedMimeTypes.find(t => t.mimeType === runtimeMimeType)?.ext || 'webm'}</span></span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
@@ -2871,7 +2884,7 @@ export default function TrackingCanvas() {
         </AnimatePresence>
 
       {/* Floating Settings toggle for when camera is not active */}
-      {!isSidebarOpen && (
+      {!cameraActive && !isSidebarOpen && (
         <button
           onClick={() => setIsSidebarOpen(true)}
           className="absolute top-14 right-4 z-20 bg-[#0a0a0a]/90 hover:bg-neutral-900 border border-neutral-800 text-neutral-200 py-2 px-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
@@ -2913,11 +2926,14 @@ export default function TrackingCanvas() {
                 sectionControls={sectionControls}
                 presetsContent={presetsContent}
                 appliedPresetId={appliedPresetId}
-                canUndo={undoStackRef.current.length > 0}
+                canUndo={undoCount > 0}
                 onChange={changeSettings}
                 onUndo={undoLastSettingsChange}
                 onResetAll={resetToFactoryDefaults}
                 onResetSection={resetSection}
+                onSectionOpenChange={(section, open) => {
+                  if (section === 'pixel') pixelSectionOpenRef.current = open;
+                }}
               />
             </div>          </motion.div>
         )}

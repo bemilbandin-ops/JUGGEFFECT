@@ -10,8 +10,9 @@ interface Props {
   section: SettingSectionId;
   settings: TrackingSettings;
   supportedMimeTypes: MimeType[];
+  effectiveMimeType: string;
   onChange: (patch: Partial<TrackingSettings>) => void;
-  onAudioSyncChange: (enabled: boolean) => void;
+  onClearPaintMask: () => void;
   onGestureStart: () => void;
   onGestureEnd: () => void;
 }
@@ -32,7 +33,7 @@ const rangeSpecs: Partial<Record<keyof TrackingSettings, readonly [number, numbe
 };
 
 const selectOptions: Partial<Record<keyof TrackingSettings, readonly (readonly [string, string])[]>> = {
-  compositeMode: [['none', 'Disabled (No Trails)'], ['screen', 'Screen (Glow)'], ['source-over', 'Normal (Solid)'], ['lighter', 'Additive (Intense)'], ['color-dodge', 'Color Dodge']],
+  compositeMode: [['screen', 'Screen (Glow)'], ['source-over', 'Normal (Solid)'], ['lighter', 'Additive (Intense)'], ['color-dodge', 'Color Dodge']],
   strobeMode: [['freeze', 'Freeze Frame (Posterize)'], ['flash', 'Blackout Flash (Strobe Light)']],
   exportQuality: [['ultra', 'Ultra (30 Mbps - Lossless/Huge)'], ['high', 'High (15 Mbps - Premium/Clear)'], ['medium', 'Medium (8 Mbps - Balanced)'], ['standard', 'Standard (4 Mbps - Compact)']],
   exportFps: [['30', '30 FPS'], ['60', '60 FPS']],
@@ -51,7 +52,25 @@ const booleanKeys = new Set<keyof TrackingSettings>([
 
 const sectionToggleKeys = new Set<keyof TrackingSettings>(['enableTrails', 'enablePoiMode', 'cloneStampEnabled']);
 
-export function SettingsSectionControls({ section, settings, supportedMimeTypes, onChange, onAudioSyncChange, onGestureStart, onGestureEnd }: Props) {
+export function formatSettingValue(key: keyof TrackingSettings, settings: TrackingSettings): string {
+  const value = settings[key];
+  if (key === 'motionThreshold') return `${135 - settings.motionThreshold}%`;
+  if (key === 'echoFadeRate') return `${Math.round((1 - settings.echoFadeRate) * 100)}% retention`;
+  if (key === 'bgLearningRate' || key === 'poiOpacity' || key === 'poiGlowIntensity' || key === 'motionBlur') return `${Math.round(Number(value) * 100)}%`;
+  if (key === 'feedbackZoom') return settings.feedbackZoom === 1 ? 'Off' : `${((settings.feedbackZoom - 1) * 100).toFixed(1)}%`;
+  if (key === 'strobeRate') return settings.strobeRate === 0 ? 'Off' : `${settings.strobeRate.toFixed(2)}s`;
+  if (key === 'poiLedCount') return settings.poiLedCount === 0 ? 'Auto' : String(settings.poiLedCount);
+  if (key === 'poiHeight') return settings.poiHeight === 0 ? 'Auto' : `${settings.poiHeight}px`;
+  if (key === 'poiCustomImage') return settings.poiCustomImage ? 'Uploaded' : 'None';
+  if (typeof value === 'boolean') return value ? 'On' : 'Off';
+  if (['blurAmount', 'verticalDrift', 'horizontalDrift', 'lineSmoothness', 'cloneStampOffsetX', 'cloneStampOffsetY', 'cloneStampBrushSize', 'cloneStampFeather', 'poiWidth', 'poiPovColumnSpacing', 'poiGlowRadius'].includes(key)) return `${value}px`;
+  if (key === 'hueRotate') return `${value}°`;
+  if (['exposure', 'contrast', 'saturation', 'temperature', 'tint'].includes(key)) return `${Number(value) > 0 ? '+' : ''}${value}%`;
+  const option = selectOptions[key]?.find(([candidate]) => candidate === String(value));
+  return option?.[1] ?? String(value ?? 'None');
+}
+
+export function SettingsSectionControls({ section, settings, supportedMimeTypes, effectiveMimeType, onChange, onClearPaintMask, onGestureStart, onGestureEnd }: Props) {
   const enabled = {
     lightThreshold: settings.enableLightTracking,
     strobeMode: settings.strobeRate > 0,
@@ -65,11 +84,7 @@ export function SettingsSectionControls({ section, settings, supportedMimeTypes,
   const sectionEnabled = section === 'trails' ? settings.enableTrails : section === 'pixel' ? settings.enablePoiMode : section === 'paint' ? settings.cloneStampEnabled : true;
 
   const patchValue = (key: keyof TrackingSettings, value: unknown) => {
-    if (key === 'compositeMode') {
-      const compositeMode = String(value);
-      onChange(compositeMode === 'none' ? { enableTrails: false, compositeMode } : { enableTrails: true, compositeMode });
-    } else if (key === 'enableAudioSync') onAudioSyncChange(Boolean(value));
-    else onChange({ [key]: value } as Partial<TrackingSettings>);
+    onChange({ [key]: value } as Partial<TrackingSettings>);
   };
 
   const range = (key: keyof TrackingSettings, spec: readonly [number, number, number], value = Number(settings[key]), convert: (value: number) => unknown = Number) => (
@@ -85,7 +100,7 @@ export function SettingsSectionControls({ section, settings, supportedMimeTypes,
     if (key === 'bgLearningRate') return range(key, [1, 20, 1], Math.round(settings.bgLearningRate * 100), (value) => value / 100);
     if (key === 'poiCustomImage') return <input type="file" accept="image/*" onChange={(event) => readImage(event, (value) => patchValue(key, value))} className="max-w-32 text-xs" />;
     if (key === 'poiText') return <input type="text" value={settings.poiText} placeholder="ENTER TEXT" onChange={(event) => patchValue(key, event.target.value.toUpperCase())} className="w-32 rounded bg-neutral-950 px-2 py-1 text-sm" />;
-    if (key === 'exportMimeType') return <select value={settings.exportMimeType} onChange={(event) => patchValue(key, event.target.value)} className="max-w-40 rounded bg-neutral-950 px-2 py-1 text-sm">{supportedMimeTypes.map((type) => <option key={type.mimeType} value={type.mimeType}>{type.label}</option>)}</select>;
+    if (key === 'exportMimeType') return <select value={effectiveMimeType} onChange={(event) => patchValue(key, event.target.value)} className="max-w-40 rounded bg-neutral-950 px-2 py-1 text-sm">{supportedMimeTypes.length ? supportedMimeTypes.map((type) => <option key={type.mimeType} value={type.mimeType}>{type.label}</option>) : <option value="video/webm">WebM (Default)</option>}</select>;
     if (booleanKeys.has(key)) return <input type="checkbox" checked={Boolean(settings[key])} onChange={(event) => patchValue(key, event.target.checked)} className="h-5 w-5 accent-blue-500" />;
     const options = selectOptions[key];
     if (options) return <select value={String(settings[key])} onChange={(event) => patchValue(key, key === 'exportFps' ? Number(event.target.value) : event.target.value)} className="max-w-40 rounded bg-neutral-950 px-2 py-1 text-sm">{options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>;
@@ -94,19 +109,28 @@ export function SettingsSectionControls({ section, settings, supportedMimeTypes,
     return <input type="text" value={String(settings[key] ?? '')} onChange={(event) => patchValue(key, event.target.value)} className="w-32 rounded bg-neutral-950 px-2 py-1 text-sm" />;
   };
 
-  return <>{(Object.keys(SETTING_DEFINITIONS) as (keyof TrackingSettings)[])
-    .filter((key) => SETTING_DEFINITIONS[key].section === section && !sectionToggleKeys.has(key))
-    .map((key) => {
+  const keys = (Object.keys(SETTING_DEFINITIONS) as (keyof TrackingSettings)[])
+    .filter((key) => SETTING_DEFINITIONS[key].section === section && !sectionToggleKeys.has(key));
+  const rows = (rowKeys: (keyof TrackingSettings)[]) => rowKeys.map((key) => {
       const definition = SETTING_DEFINITIONS[key] as SettingDefinition;
       const dependencyEnabled = enabled[key] ?? true;
       const disabled = !sectionEnabled || !dependencyEnabled;
       return <div key={key}><SettingRow settingKey={key} label={definition.label} description={definition.description}
         changed={settings[key] !== DEFAULT_TRACKING_SETTINGS[key]}
+        valueText={key === 'exportMimeType' ? supportedMimeTypes.find((type) => type.mimeType === effectiveMimeType)?.label ?? 'WebM (Default)' : formatSettingValue(key, settings)}
         disabledReason={disabled ? (!sectionEnabled ? `Enable ${section === 'pixel' ? 'Pixel / POV' : section === 'paint' ? 'Paint / Clone' : 'Trails'} to use this.` : definition.dependsOn?.explanation ?? 'Enable the parent option to use this.') : undefined}
         onReset={() => onChange({ [key]: DEFAULT_TRACKING_SETTINGS[key] } as Partial<TrackingSettings>)}>
         {control(key)}
       </SettingRow></div>;
-    })}</>;
+    });
+  const basicKeys = keys.filter((key) => !(SETTING_DEFINITIONS[key] as SettingDefinition).advanced);
+  const advancedKeys = keys.filter((key) => (SETTING_DEFINITIONS[key] as SettingDefinition).advanced);
+
+  return <>{rows(basicKeys)}{advancedKeys.length > 0 && <details className="mt-2 rounded border border-neutral-800">
+    <summary className="min-h-10 cursor-pointer px-3 py-2 text-xs font-medium text-neutral-300">More settings ({advancedKeys.length})</summary>
+    <div className="border-t border-neutral-800 px-3">{rows(advancedKeys)}</div>
+  </details>}
+  {section === 'paint' && <button type="button" onClick={onClearPaintMask} className="mt-3 rounded bg-neutral-800 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-700">Clear Paint Mask</button>}</>;
 }
 
 function readImage(event: ChangeEvent<HTMLInputElement>, onLoad: (value: string) => void) {

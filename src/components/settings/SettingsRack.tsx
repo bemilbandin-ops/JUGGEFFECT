@@ -20,6 +20,7 @@ interface SettingsRackProps {
   onUndo: () => void;
   onResetAll: () => void;
   onResetSection: (section: SettingSectionId) => void;
+  onSectionOpenChange: (section: SettingSectionId, open: boolean) => void;
 }
 
 const sectionTitle: Record<SettingSectionId, string> = {
@@ -48,7 +49,7 @@ export function getRackStatusLabel(settings: TrackingSettings, appliedPresetId: 
   return !appliedPresetId && getChangedSettingKeys(settings).length > 0 ? 'Modified' : null;
 }
 
-export function SettingsRack({ settings, sectionControls, presetsContent, appliedPresetId, canUndo, onChange, onUndo, onResetAll, onResetSection }: SettingsRackProps) {
+export function SettingsRack({ settings, sectionControls, presetsContent, appliedPresetId, canUndo, onChange, onUndo, onResetAll, onResetSection, onSectionOpenChange }: SettingsRackProps) {
   const [search, setSearch] = useState('');
   const [showPresets, setShowPresets] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
@@ -65,9 +66,12 @@ export function SettingsRack({ settings, sectionControls, presetsContent, applie
       if (!details) return;
       details.open = true;
       const control = details.querySelector<HTMLElement>(`[data-setting-key="${selectedKey}"][data-setting-control], [data-setting-key="${selectedKey}"] [data-setting-control]`);
+      const advanced = control?.closest<HTMLDetailsElement>('details');
+      if (advanced && advanced !== details) advanced.open = true;
+      const target = control?.matches(':disabled') ? control.closest<HTMLElement>('[data-setting-focus-target]') : control;
       requestAnimationFrame(() => {
-        (control ?? details).focus({ preventScroll: true });
-        (control ?? details).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        (target ?? details).focus({ preventScroll: true });
+        (target ?? details).scrollIntoView({ behavior: 'smooth', block: 'center' });
         setSelectedKey(null);
       });
     });
@@ -143,10 +147,11 @@ export function SettingsRack({ settings, sectionControls, presetsContent, applie
             title={sectionTitle[section]}
             summary={sectionSummary[section](settings)}
             defaultOpen={section === 'tracking'}
+            onOpenChange={(open) => onSectionOpenChange(section, open)}
             enabled={section === 'trails' ? settings.enableTrails : section === 'pixel' ? settings.enablePoiMode : section === 'paint' ? settings.cloneStampEnabled : undefined}
             enabledSettingKey={section === 'trails' ? 'enableTrails' : section === 'pixel' ? 'enablePoiMode' : section === 'paint' ? 'cloneStampEnabled' : undefined}
             onEnabledChange={section === 'trails'
-              ? (value) => onChange({ enableTrails: value })
+              ? (value) => onChange(value && settings.compositeMode === 'none' ? { enableTrails: true, compositeMode: 'screen' } : { enableTrails: value })
               : section === 'pixel'
                 ? (value) => onChange({ enablePoiMode: value })
                 : section === 'paint'

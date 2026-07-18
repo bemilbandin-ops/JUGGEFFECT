@@ -13,6 +13,7 @@ interface SettingRowProps {
   label: string;
   description: string;
   changed?: boolean;
+  valueText?: string;
   disabledReason?: string;
   onReset?: () => void;
   children: ReactElement<ControlProps>;
@@ -27,6 +28,7 @@ export function SettingRow({
   label,
   description,
   changed = false,
+  valueText,
   disabledReason,
   onReset,
   children,
@@ -44,11 +46,12 @@ export function SettingRow({
   });
 
   return (
-    <div data-setting-key={settingKey} className="flex gap-3 border-b border-neutral-800 py-3 last:border-0">
+    <div data-setting-key={settingKey} data-setting-focus-target tabIndex={-1} className="flex gap-3 border-b border-neutral-800 py-3 outline-none focus:rounded focus:bg-blue-950/30 focus:ring-2 focus:ring-blue-500 last:border-0">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span id={labelId} className="text-sm text-neutral-200">{label}</span>
           {changed && <span className="text-xs text-amber-400">Changed</span>}
+          {valueText && <span className="ml-auto text-xs font-mono text-neutral-300">{valueText}</span>}
         </div>
         <p id={descriptionId} className="mt-0.5 text-xs text-neutral-500">{description}</p>
         {disabledReason && <p id={disabledReasonId} className="mt-1 text-xs text-neutral-400">{disabledReason}</p>}

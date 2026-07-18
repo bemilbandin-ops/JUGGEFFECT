@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import type { TrackingSettings } from '../../types';
 
 const OPEN_SECTIONS_KEY = 'juggeffect_open_sections';
@@ -10,6 +10,7 @@ interface EffectSectionProps {
   enabled?: boolean;
   enabledSettingKey?: keyof TrackingSettings;
   onEnabledChange?: (enabled: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
   defaultOpen?: boolean;
   children: ReactNode;
 }
@@ -31,10 +32,13 @@ export function EffectSection({
   enabled,
   enabledSettingKey,
   onEnabledChange,
+  onOpenChange,
   defaultOpen = false,
   children,
 }: EffectSectionProps) {
   const [isOpen, setIsOpen] = useState(() => savedOpenSections()?.includes(id) ?? defaultOpen);
+
+  useEffect(() => onOpenChange?.(isOpen), [isOpen, onOpenChange]);
 
   return (
     <details
@@ -47,7 +51,11 @@ export function EffectSection({
         const openSections = new Set(savedOpenSections() ?? []);
         if (event.currentTarget.open) openSections.add(id);
         else openSections.delete(id);
-        localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...openSections]));
+        try {
+          localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...openSections]));
+        } catch {
+          // Settings remain usable when storage is unavailable.
+        }
       }}
     >
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-3 px-3 py-2.5 marker:content-none">

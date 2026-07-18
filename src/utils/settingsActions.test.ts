@@ -14,4 +14,10 @@ const history = appendSettingsHistory([], first.previous);
 assert(history.length === 1, 'one logical change must add one history entry');
 assert(undoSettings(first.next, history[0]) === DEFAULT_TRACKING_SETTINGS, 'history entry must restore the prior snapshot');
 
+const enabledTrails = applySettingsPatch(
+  { ...DEFAULT_TRACKING_SETTINGS, enableTrails: false, compositeMode: 'none' },
+  { enableTrails: true },
+);
+assert(enabledTrails.next.compositeMode === 'screen', 'enabled trails must normalize a disabled blend mode');
+
 console.log('✓ Settings actions apply patches and restore exact snapshots');

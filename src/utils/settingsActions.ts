@@ -9,7 +9,9 @@ export function applySettingsPatch(
   current: TrackingSettings,
   patch: Partial<TrackingSettings>,
 ): SettingsSnapshot {
-  return { previous: current, next: { ...current, ...patch } };
+  const next = { ...current, ...patch };
+  if (next.enableTrails && next.compositeMode === 'none') next.compositeMode = 'screen';
+  return { previous: current, next };
 }
 
 export function appendSettingsHistory(
