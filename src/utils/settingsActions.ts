@@ -12,6 +12,13 @@ export function applySettingsPatch(
   return { previous: current, next: { ...current, ...patch } };
 }
 
+export function appendSettingsHistory(
+  history: TrackingSettings[],
+  previous: TrackingSettings,
+): TrackingSettings[] {
+  return [...history.slice(-49), previous];
+}
+
 export function undoSettings(
   _current: TrackingSettings,
   previous: TrackingSettings,

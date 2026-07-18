@@ -41,7 +41,7 @@ import { DEFAULT_TRACKING_SETTINGS, QUICK_PRESETS } from '../config/settingsDefa
 import { sanitizeSettings, SETTING_DEFINITIONS, type SettingSectionId } from '../config/settingsRack';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
-import { applySettingsPatch, undoSettings } from '../utils/settingsActions';
+import { appendSettingsHistory, applySettingsPatch, undoSettings } from '../utils/settingsActions';
 import {
   createPovProjectionState,
   samplePovColumns,
@@ -507,15 +507,14 @@ export default function TrackingCanvas() {
   const [activeTab, setActiveTab] = useState<'presets' | 'trails' | 'poi' | 'camera' | 'paint'>('presets');
 
   const changeSettings = (patch: Partial<TrackingSettings>) => {
-    setSettings((current) => {
-      const snapshot = applySettingsPatch(current, patch);
-      if (settingsGestureStartRef.current) {
-        settingsGestureChangedRef.current = true;
-      } else {
-        undoStackRef.current = [...undoStackRef.current.slice(-49), snapshot.previous];
-      }
-      return snapshot.next;
-    });
+    const snapshot = applySettingsPatch(settingsRef.current, patch);
+    if (settingsGestureStartRef.current) {
+      settingsGestureChangedRef.current = true;
+    } else {
+      undoStackRef.current = appendSettingsHistory(undoStackRef.current, snapshot.previous);
+    }
+    settingsRef.current = snapshot.next;
+    setSettings(snapshot.next);
     setAppliedPresetId(null);
     setAppliedOption(null);
   };
@@ -528,7 +527,7 @@ export default function TrackingCanvas() {
   const endSettingsGesture = () => {
     const previous = settingsGestureStartRef.current;
     if (previous && settingsGestureChangedRef.current) {
-      undoStackRef.current = [...undoStackRef.current.slice(-49), previous];
+      undoStackRef.current = appendSettingsHistory(undoStackRef.current, previous);
     }
     settingsGestureStartRef.current = null;
     settingsGestureChangedRef.current = false;
@@ -537,7 +536,9 @@ export default function TrackingCanvas() {
   const undoLastSettingsChange = () => {
     const previous = undoStackRef.current.at(-1);
     if (!previous) return;
-    setSettings((current) => undoSettings(current, previous));
+    const next = undoSettings(settingsRef.current, previous);
+    settingsRef.current = next;
+    setSettings(next);
     undoStackRef.current = undoStackRef.current.slice(0, -1);
     setAppliedPresetId(null);
     setAppliedOption(null);
