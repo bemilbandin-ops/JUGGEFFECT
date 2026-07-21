@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrackingSettings } from '../types';
-import { GeminiResponse } from '../utils/gemini';
 import PresetsTab from './settings/PresetsTab';
 import TrailsTab from './settings/TrailsTab';
 import PoiTab from './settings/PoiTab';
@@ -30,20 +29,7 @@ export interface SettingsDrawerProps {
   appliedPresetId: string | null;
   applyPreset: (presetId: string, presetSettings: Partial<TrackingSettings>) => void;
   getSettingDisplayName: (key: string, val: any) => string;
-  geminiCollapsed: boolean;
-  setGeminiCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  geminiActive: boolean;
-  hasEnvApiKey: boolean;
-  apiKeyInput: string;
-  setApiKeyInput: (key: string) => void;
-  handleSaveApiKey: (key: string) => void;
   cameraActive: boolean;
-  runGeminiAnalysis: () => void;
-  isGeminiAnalyzing: boolean;
-  geminiError: string | null;
-  geminiAnalysisResult: GeminiResponse | null;
-  applyRecommendedSettings: (recSettings: Partial<TrackingSettings>, option: 'A' | 'B') => void;
-  appliedOption: 'A' | 'B' | null;
   removalMaskCtxRef: React.RefObject<CanvasRenderingContext2D | null>;
   removalMaskCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   startCamera: () => void;
@@ -62,20 +48,7 @@ export default function SettingsDrawer({
   appliedPresetId,
   applyPreset,
   getSettingDisplayName,
-  geminiCollapsed,
-  setGeminiCollapsed,
-  geminiActive,
-  hasEnvApiKey,
-  apiKeyInput,
-  setApiKeyInput,
-  handleSaveApiKey,
   cameraActive,
-  runGeminiAnalysis,
-  isGeminiAnalyzing,
-  geminiError,
-  geminiAnalysisResult,
-  applyRecommendedSettings,
-  appliedOption,
   removalMaskCtxRef,
   removalMaskCanvasRef,
   startCamera,
@@ -154,20 +127,6 @@ export default function SettingsDrawer({
                 appliedPresetId={appliedPresetId}
                 applyPreset={applyPreset}
                 getSettingDisplayName={getSettingDisplayName}
-                geminiCollapsed={geminiCollapsed}
-                setGeminiCollapsed={setGeminiCollapsed}
-                geminiActive={geminiActive}
-                hasEnvApiKey={hasEnvApiKey}
-                apiKeyInput={apiKeyInput}
-                setApiKeyInput={setApiKeyInput}
-                handleSaveApiKey={handleSaveApiKey}
-                cameraActive={cameraActive}
-                runGeminiAnalysis={runGeminiAnalysis}
-                isGeminiAnalyzing={isGeminiAnalyzing}
-                geminiError={geminiError}
-                geminiAnalysisResult={geminiAnalysisResult}
-                applyRecommendedSettings={applyRecommendedSettings}
-                appliedOption={appliedOption}
               />
             )}
 

@@ -35,20 +35,10 @@ export default function TrackingCanvas() {
     setActiveTunerKey,
     settings,
     setSettings,
-    apiKeyInput,
-    setApiKeyInput,
-    geminiActive,
-    isGeminiAnalyzing,
-    geminiAnalysisResult,
-    geminiError,
-    appliedOption,
     originalSettings,
     appliedPresetId,
-    geminiCollapsed,
-    setGeminiCollapsed,
     activeTab,
     setActiveTab,
-    hasEnvApiKey,
     isRecording,
     recordingSeconds,
     recordedVideoUrl,
@@ -65,9 +55,6 @@ export default function TrackingCanvas() {
     getSettingColor,
     getAdjustmentMatrix,
     getSettingDisplayName,
-    handleSaveApiKey,
-    runGeminiAnalysis,
-    applyRecommendedSettings,
     applyPreset,
     resetToOriginalSettings,
     resetToFactoryDefaults,
@@ -247,20 +234,7 @@ export default function TrackingCanvas() {
         appliedPresetId={appliedPresetId}
         applyPreset={applyPreset}
         getSettingDisplayName={getSettingDisplayName}
-        geminiCollapsed={geminiCollapsed}
-        setGeminiCollapsed={setGeminiCollapsed}
-        geminiActive={geminiActive}
-        hasEnvApiKey={hasEnvApiKey}
-        apiKeyInput={apiKeyInput}
-        setApiKeyInput={setApiKeyInput}
-        handleSaveApiKey={handleSaveApiKey}
         cameraActive={cameraActive}
-        runGeminiAnalysis={runGeminiAnalysis}
-        isGeminiAnalyzing={isGeminiAnalyzing}
-        geminiError={geminiError}
-        geminiAnalysisResult={geminiAnalysisResult}
-        applyRecommendedSettings={applyRecommendedSettings}
-        appliedOption={appliedOption}
         removalMaskCtxRef={removalMaskCtxRef}
         removalMaskCanvasRef={removalMaskCanvasRef}
         startCamera={startCamera}
