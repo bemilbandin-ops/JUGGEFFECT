@@ -3,6 +3,7 @@ import type { TrackingSettings } from '../types';
 import { drawDebugOverlay } from './debugOverlay';
 import { drawCloneStampPreview } from './cloneStampOverlay';
 import { drawRadialCenterGuide } from './radialCenterGuide';
+import { scheduleNextFrame } from './frameScheduler';
 
 export interface RenderPausedFrameParams {
   video: HTMLVideoElement;
@@ -159,5 +160,5 @@ export function renderPausedFrame(params: RenderPausedFrameParams): void {
     );
   }
 
-  animationFrameIdRef.current = requestAnimationFrame(render);
+  scheduleNextFrame(animationFrameIdRef, render);
 }

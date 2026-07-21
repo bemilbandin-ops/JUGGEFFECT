@@ -1,57 +1,18 @@
-import React, { useRef, useEffect, useState, MouseEvent } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
-  Camera,
-  Play,
-  Pause,
-  RotateCcw,
-  Square,
-  Download,
-  Maximize2,
-  Minimize2,
-  Trash2,
-  Pipette,
-  Paintbrush,
-  Check,
-  Eye,
   Sliders,
-  Sparkles,
-  Info,
-  ChevronRight,
-  Activity,
-  Award,
+  Camera,
   Waves,
-  X,
-  Key,
-  AlertCircle,
-  Zap,
-  Wind,
-  ChevronDown,
-  ChevronUp,
-  Infinity,
-  Moon,
-  Sun,
-  Contrast,
-  Thermometer,
-  Palette,
-  Flame
+  Activity,
+  Sparkles,
+  Maximize2,
+  Info,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { HSV, TrackingSettings } from '../types';
-import { DEFAULT_TRACKING_SETTINGS, QUICK_PRESETS } from '../config/settingsDefaults';
+import { TrackingSettings } from '../types';
+import { DEFAULT_TRACKING_SETTINGS } from '../config/settingsDefaults';
 import { extractMotion } from '../engine/motionExtractor';
 import { analyzeScene, getGeminiClient, GeminiResponse } from '../utils/gemini';
-import {
-  createPovProjectionState,
-  samplePovColumns,
-  matchTrackedPoints,
-  calculateLedStripGeometry,
-  PovProjectionState,
-  PovTrailEntry,
-  PovSample,
-} from '../utils/pov';
-import { detectBlobs, BlobPoint, BlobCluster } from '../utils/blobDetection';
-import { formatTime } from '../utils/time';
-import { drawLedColumn, drawFullPattern } from '../utils/ledShaders';
+import { PovProjectionState, PovTrailEntry } from '../utils/pov';
 import { updatePoiPattern } from '../utils/poiPatternGenerator';
 import { drawCloneStampPreview } from '../engine/cloneStampOverlay';
 import { drawRadialCenterGuide } from '../engine/radialCenterGuide';
@@ -60,10 +21,15 @@ import { getCameraFilterString, getTrackingFilterString } from '../engine/camera
 import { drawDebugOverlay, updateFpsCounter } from '../engine/debugOverlay';
 import { prepareCloneStampBaseCanvases } from '../engine/cloneStampCanvasPrep';
 import { renderPausedFrame } from '../engine/pausedFrameRenderer';
-import VariantSelector from './VariantSelector';
+import { processMotionBlur } from '../engine/motionBlurProcessor';
+import { processTrails } from '../engine/trailProcessor';
+import { scheduleNextFrame } from '../engine/frameScheduler';
 import CanvasHud from './CanvasHud';
 import SettingsDrawer from './SettingsDrawer';
-
+import VideoSourceSetup from './canvas/VideoSourceSetup';
+import ExportModal from './canvas/ExportModal';
+import ExportPreviewModal from './canvas/ExportPreviewModal';
+import MobileTunerOverlay from './canvas/MobileTunerOverlay';
 
 export default function TrackingCanvas() {
   // Elements
@@ -106,10 +72,7 @@ export default function TrackingCanvas() {
   const poiPatternDataRef = useRef<ImageData | null>(null);
   const poiCustomImageElementRef = useRef<HTMLImageElement | null>(null);
   const poiColumnIndexRef = useRef<number>(0);
-  // POV trail buffer: stores painted column snapshots per tracked point
-  // Each entry: { id: trackingId, x, y, angle, colIdx, length, timestamp }
   const poiTrailBufferRef = useRef<Map<number, PovTrailEntry[]>>(new Map());
-  // Track accumulated distance per tracked point (for per-pixel-distance column advancement)
   const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
   const poiProjectionStateRef = useRef<Map<number, PovProjectionState>>(new Map());
   const lastSettingsStrRef = useRef<string>('');
@@ -145,7 +108,6 @@ export default function TrackingCanvas() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // Merge with DEFAULT_TRACKING_SETTINGS to ensure any newly added setting fields exist
           return { ...DEFAULT_TRACKING_SETTINGS, ...parsed };
         } catch (e) {
           console.error('Failed to parse saved settings:', e);
@@ -167,8 +129,6 @@ export default function TrackingCanvas() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
-
-
 
   useEffect(() => {
     poiPatternDataRef.current = null;
@@ -217,8 +177,6 @@ export default function TrackingCanvas() {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    // Standardize and downscale resolution for AI analysis (max 640px on the longest side)
-    // This dramatically reduces upload times and inference latency for high-res cameras/videos.
     const maxDimension = 640;
     let width = video.videoWidth;
     let height = video.videoHeight;
@@ -255,7 +213,6 @@ export default function TrackingCanvas() {
       if (!dataUrl) {
         throw new Error('Please start the camera or a video file first to capture a frame.');
       }
-      console.log('Captured image payload size:', Math.round(dataUrl.length / 1024), 'KB');
 
       const client = getGeminiClient(apiKeyInput);
       if (!client) {
@@ -285,7 +242,7 @@ export default function TrackingCanvas() {
       };
     });
     setAppliedOption(option);
-    setAppliedPresetId(null); // Clear preset selection if AI is used
+    setAppliedPresetId(null);
   };
 
   const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
@@ -301,7 +258,7 @@ export default function TrackingCanvas() {
       };
     });
     setAppliedPresetId(presetId);
-    setAppliedOption(null); // Clear Gemini option applied state
+    setAppliedOption(null);
   };
 
   const resetToOriginalSettings = () => {
@@ -328,18 +285,15 @@ export default function TrackingCanvas() {
   };
 
   const getAdjustmentMatrix = () => {
-    const t = settings.temperature / 100; // -1 to 1
-    const p = settings.tint / 100;        // -1 to 1
+    const t = settings.temperature / 100;
+    const p = settings.tint / 100;
 
-    // Warmth (Temperature): warmer = more red/green, less blue; cooler = less red/green, more blue
-    // Tint: magenta = more red/blue, less green; green = less red/blue, more green
     const r_scale = 1 + t * 0.15 + p * 0.08;
     const g_scale = 1 + t * 0.05 - p * 0.15;
     const b_scale = 1 - t * 0.15 + p * 0.08;
 
     return `${r_scale} 0 0 0 0 0 ${g_scale} 0 0 0 0 0 ${b_scale} 0 0 0 0 0 1 0`;
   };
-
 
   const getSettingDisplayName = (key: string, val: any): string => {
     switch (key) {
@@ -430,7 +384,6 @@ export default function TrackingCanvas() {
         if (videoDevices.length > 0) {
           setSelectedDeviceId(videoDevices[0].deviceId);
         }
-        // stop dummy stream if created
         if (stream) {
           stream.getTracks().forEach((track) => track.stop());
         }
@@ -440,7 +393,6 @@ export default function TrackingCanvas() {
     }
     getDevices();
 
-    // Clean up on unmount
     return () => {
       stopCamera();
     };
@@ -567,7 +519,6 @@ export default function TrackingCanvas() {
     if (videoRef.current.paused) {
       videoRef.current.play().catch(err => {
         if (err.name === 'AbortError' || err.message?.includes('interrupted')) {
-          console.log('Playback interrupted/aborted');
           return;
         }
         console.error('Play error:', err);
@@ -594,7 +545,6 @@ export default function TrackingCanvas() {
     poiAccumulatedDistRef.current.clear();
   };
 
-  // Start Camera Feed or Video File
   async function startCamera() {
     setCameraLoading(true);
     stopCamera();
@@ -649,9 +599,7 @@ export default function TrackingCanvas() {
   function setupVideoPlayback() {
     if (!videoRef.current) return;
     
-    // Start processing once video is playing and loaded
     videoRef.current.onloadedmetadata = () => {
-      // Reset background model and buffers on camera start
       bgDataRef.current = null;
       motionMaskDataRef.current = null;
       if (trailCanvasRef.current) {
@@ -667,7 +615,6 @@ export default function TrackingCanvas() {
 
     videoRef.current.play().then(() => {
       setCameraActive(true);
-      // In case metadata is already loaded (can happen with local files on re-play)
       if (videoRef.current!.videoWidth > 0 && !animationFrameIdRef.current) {
          videoRef.current!.onloadedmetadata = null;
          bgDataRef.current = null;
@@ -683,9 +630,7 @@ export default function TrackingCanvas() {
          startRenderLoop();
       }
     }).catch(err => {
-      // Ignore AbortError / interrupted by pause calls as they are standard browser behavior during source/mode switching
       if (err.name === 'AbortError' || err.message?.includes('interrupted')) {
-        console.log('Video playback interrupted (expected during source/mode switching).');
         return;
       }
       console.error('Video play error:', err);
@@ -693,7 +638,6 @@ export default function TrackingCanvas() {
     });
   }
 
-  // Stop Camera Feed and loop
   function stopCamera() {
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
@@ -719,7 +663,6 @@ export default function TrackingCanvas() {
     setDuration(0);
   }
 
-  // Helper to map client mouse/touch positions to internal canvas dimensions (handles object-contain scaling)
   function getCanvasMousePos(canvas: HTMLCanvasElement, e: React.PointerEvent<HTMLCanvasElement>) {
     const rect = canvas.getBoundingClientRect();
     const elementWidth = rect.width;
@@ -736,13 +679,11 @@ export default function TrackingCanvas() {
     let offsetY = 0;
 
     if (canvasRatio > elementRatio) {
-      // Canvas is wider than element (letterboxed top/bottom)
       const renderHeight = elementWidth / canvasRatio;
       scaleX = canvasWidth / elementWidth;
       scaleY = canvasHeight / renderHeight;
       offsetY = (elementHeight - renderHeight) / 2;
     } else {
-      // Canvas is taller than element (pillarboxed left/right)
       const renderWidth = elementHeight * canvasRatio;
       scaleX = canvasWidth / renderWidth;
       scaleY = canvasHeight / elementHeight;
@@ -821,7 +762,6 @@ export default function TrackingCanvas() {
   const colorCycleAngleRef = useRef<number>(0);
   const lastStrobeTimeRef = useRef<number>(0);
 
-  // High-performance CV processing and canvas rendering
   function startRenderLoop() {
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
@@ -832,14 +772,12 @@ export default function TrackingCanvas() {
     const canvas = displayCanvasRef.current;
     if (!video || !canvas) return;
 
-    // Create / configure the low-resolution hidden processing canvas
     if (!processingCanvasRef.current) {
       processingCanvasRef.current = document.createElement('canvas');
     }
     const procCanvas = processingCanvasRef.current;
     const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
     
-    // Create / configure the persistent trail canvas for Echo effect
     if (!trailCanvasRef.current) {
       trailCanvasRef.current = document.createElement('canvas');
     }
@@ -852,7 +790,6 @@ export default function TrackingCanvas() {
     const blurredVideoCanvas = blurredVideoCanvasRef.current;
     const blurredVideoCtx = blurredVideoCanvas.getContext('2d');
 
-    // Set processing resolution (standard 640x480 for flow props)
     procCanvas.width = 640;
     procCanvas.height = 480;
 
@@ -861,7 +798,7 @@ export default function TrackingCanvas() {
 
     const render = () => {
       if (video.videoWidth === 0 || video.videoHeight === 0) {
-        animationFrameIdRef.current = requestAnimationFrame(render);
+        scheduleNextFrame(animationFrameIdRef, render);
         return;
       }
 
@@ -870,7 +807,6 @@ export default function TrackingCanvas() {
       const cameraFilter = getCameraFilterString(currentSettings);
       const trackingFilter = getTrackingFilterString(currentSettings);
 
-      // Match display canvas size to video aspect ratio dynamically
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -879,12 +815,10 @@ export default function TrackingCanvas() {
       const w = canvas.width;
       const h = canvas.height;
 
-      // Initialize and resize clone stamp base canvas & removal mask canvas (Phase 2)
       const {
         stampedVideoCanvas,
         stampedVideoCtx,
         removalMaskCanvas,
-        removalMaskCtx,
       } = prepareCloneStampBaseCanvases(
         stampedVideoCanvasRef,
         removalMaskCanvasRef,
@@ -919,7 +853,6 @@ export default function TrackingCanvas() {
         return;
       }
 
-      // Draw original video frame and apply Clone Stamp if enabled
       if (stampedVideoCtx) {
         stampedVideoCtx.drawImage(video, 0, 0, stampedVideoCanvas.width, stampedVideoCanvas.height);
         
@@ -999,7 +932,7 @@ export default function TrackingCanvas() {
         blurredVideoCanvas.width = video.videoWidth;
         blurredVideoCanvas.height = video.videoHeight;
         blurredVideoCtx.filter = cameraFilter;
-        blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, video.videoWidth, video.videoHeight); // seed it
+        blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, video.videoWidth, video.videoHeight);
         blurredVideoCtx.filter = 'none';
       }
 
@@ -1013,7 +946,7 @@ export default function TrackingCanvas() {
         strobeVideoCanvas.height = video.videoHeight;
         if (strobeVideoCtx) {
           strobeVideoCtx.filter = cameraFilter;
-          strobeVideoCtx.drawImage(stampedVideoCanvas, 0, 0, video.videoWidth, video.videoHeight); // seed it
+          strobeVideoCtx.drawImage(stampedVideoCanvas, 0, 0, video.videoWidth, video.videoHeight);
           strobeVideoCtx.filter = 'none';
         }
       }
@@ -1031,14 +964,13 @@ export default function TrackingCanvas() {
         strobeVideoCtx.filter = 'none';
       }
 
-      // 2. Draw raw video frame to display canvas
       if (!isStrobeActive) {
         ctx.filter = cameraFilter;
         ctx.drawImage(stampedVideoCanvas, 0, 0, w, h);
         ctx.filter = 'none';
       } else {
         if (currentSettings.strobeMode === 'flash') {
-          const flashDuration = 40; // flash duration in ms
+          const flashDuration = 40;
           if (now - lastStrobeTimeRef.current <= flashDuration) {
             ctx.drawImage(strobeVideoCanvas, 0, 0, w, h);
           } else {
@@ -1050,7 +982,6 @@ export default function TrackingCanvas() {
         }
       }
 
-      // 3. Process frame for tracking (Phase 5)
       extractMotion({
         stampedVideoCanvas,
         procCanvas,
@@ -1062,550 +993,55 @@ export default function TrackingCanvas() {
         currentSettings,
       });
 
-      // 4. Temporal Motion Blur (Only applied to moving objects)
-      if (currentSettings.motionBlur > 0) {
-        // Accumulate video frames inside the blur canvas
-        blurredVideoCtx.filter = cameraFilter;
-        blurredVideoCtx.globalAlpha = 1.0 - currentSettings.motionBlur;
-        blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
-        blurredVideoCtx.globalAlpha = 1.0;
-        blurredVideoCtx.filter = 'none';
+      processMotionBlur({
+        currentSettings,
+        blurredVideoCtx,
+        cameraFilter,
+        stampedVideoCanvas,
+        blurredVideoCanvas,
+        maskedBlurCanvasRef,
+        video,
+        procCanvas,
+        ctx,
+        w,
+        h,
+      });
 
-        if (!maskedBlurCanvasRef.current) {
-          maskedBlurCanvasRef.current = document.createElement('canvas');
-        }
-        const maskedBlurCanvas = maskedBlurCanvasRef.current;
-        const maskedBlurCtx = maskedBlurCanvas.getContext('2d');
+      processTrails({
+        currentSettings,
+        isStrobeTriggered,
+        now,
+        w,
+        h,
+        ctx,
+        trailCanvas,
+        trailCtx,
+        procCanvas,
+        frameCountAbsRef,
+        colorCycleAngleRef,
+        driftCanvasRef,
+        poiPatternCanvasRef,
+        poiPatternDataRef,
+        poiCustomImageElementRef,
+        motionMaskDataRef,
+        isPaintingRef,
+        hoverPosRef,
+        trackedPointsRef,
+        nextTrackedIdRef,
+        povCanvasRef,
+        lastSettingsStrRef,
+        poiColumnIndexRef,
+        poiTrailBufferRef,
+        poiProjectionStateRef,
+        poiAccumulatedDistRef,
+      });
 
-        if (maskedBlurCanvas.width !== video.videoWidth || maskedBlurCanvas.height !== video.videoHeight) {
-          maskedBlurCanvas.width = video.videoWidth;
-          maskedBlurCanvas.height = video.videoHeight;
-        }
-
-        if (maskedBlurCtx) {
-          // Clear temp canvas
-          maskedBlurCtx.clearRect(0, 0, maskedBlurCanvas.width, maskedBlurCanvas.height);
-          
-          // Draw the low-res motion mask (stretched to full size)
-          maskedBlurCtx.drawImage(procCanvas, 0, 0, maskedBlurCanvas.width, maskedBlurCanvas.height);
-          
-          // Mask the accumulated blurred video frame
-          maskedBlurCtx.globalCompositeOperation = 'source-in';
-          maskedBlurCtx.drawImage(blurredVideoCanvas, 0, 0);
-          maskedBlurCtx.globalCompositeOperation = 'source-over';
-          
-          // Draw only the blurred motion area on top of the sharp video
-          ctx.drawImage(maskedBlurCanvas, 0, 0, w, h);
-        }
-      } else {
-        // Keep it seeded so it doesn't blink black if turned on
-        blurredVideoCtx.filter = cameraFilter;
-        blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
-        blurredVideoCtx.filter = 'none';
-      }
-
-      // Effect: Trail processing and rendering
-      const shouldProcessTrails = currentSettings.enableTrails;
-      const usePov = currentSettings.poiPovEnabled;
-
-      if (shouldProcessTrails) {
-        // Effect: Color Cycle updates continuously for smooth hue rotation
-        frameCountAbsRef.current++;
-        colorCycleAngleRef.current = (colorCycleAngleRef.current + currentSettings.colorCycleSpeed) % 360;
-
-        if (isStrobeTriggered) {
-          // 1. Effect: Feedback Zoom and Smoke Drift (only on strobe trigger to avoid smearing and rapid vanishing)
-          if (currentSettings.verticalDrift !== 0 || currentSettings.horizontalDrift !== 0 || currentSettings.feedbackZoom !== 1.0) {
-            if (!driftCanvasRef.current) {
-              driftCanvasRef.current = document.createElement('canvas');
-            }
-            const tempCanvas = driftCanvasRef.current;
-            if (tempCanvas.width !== trailCanvas.width || tempCanvas.height !== trailCanvas.height) {
-              tempCanvas.width = trailCanvas.width;
-              tempCanvas.height = trailCanvas.height;
-            }
-            const tempCtx = tempCanvas.getContext('2d');
-            if (tempCtx) {
-              tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-              tempCtx.drawImage(trailCanvas, 0, 0);
-              trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-              
-              trailCtx.save();
-              // Center for scaling
-              trailCtx.translate(trailCanvas.width / 2, trailCanvas.height / 2);
-              trailCtx.scale(currentSettings.feedbackZoom, currentSettings.feedbackZoom);
-              trailCtx.translate(-trailCanvas.width / 2, -trailCanvas.height / 2);
-              
-              // Apply drift
-              trailCtx.drawImage(tempCanvas, currentSettings.horizontalDrift, currentSettings.verticalDrift);
-              trailCtx.restore();
-            }
-          }
-
-          // 2. Apply fade (only on strobe trigger to preserve trail persistence across intervals)
-          const fadeRate = currentSettings.echoFadeRate;
-          trailCtx.globalCompositeOperation = 'destination-out';
-          trailCtx.fillStyle = `rgba(0, 0, 0, ${fadeRate})`;
-          trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
-
-          // 3. Stroboscopic rendering: Draw new motion mask snapshot onto the trail canvas
-          trailCtx.globalCompositeOperation = 'source-over';
-          
-          const filters = [];
-          if (currentSettings.blurAmount > 0) {
-            filters.push(`blur(${currentSettings.blurAmount}px)`);
-          }
-          
-          const totalHueShift = (currentSettings.hueRotate + colorCycleAngleRef.current) % 360;
-          if (totalHueShift > 0) {
-            filters.push(`hue-rotate(${totalHueShift}deg)`);
-          }
-          
-          trailCtx.filter = filters.length > 0 ? filters.join(' ') : 'none';
-          
-          if (currentSettings.enablePoiMode) {
-            const patternCanvas = poiPatternCanvasRef.current || (poiPatternCanvasRef.current = document.createElement('canvas'));
-            if (!poiPatternDataRef.current) {
-              updatePoiPattern(patternCanvas, currentSettings, poiCustomImageElementRef.current);
-              const pCtx = patternCanvas.getContext('2d');
-              if (pCtx && patternCanvas.width > 0 && patternCanvas.height > 0) {
-                poiPatternDataRef.current = pCtx.getImageData(0, 0, patternCanvas.width, patternCanvas.height);
-              }
-            }
-
-            if (patternCanvas) {
-              const rawBlobs = detectBlobs(motionMaskDataRef.current!, currentSettings.poiMaxPoints);
-               const scaleX = trailCanvas.width / procCanvas.width;
-              const scaleY = trailCanvas.height / procCanvas.height;
-              const currentBlobs = rawBlobs.map(b => ({
-                x: b.x * scaleX,
-                y: b.y * scaleY,
-                angle: b.angle,
-                length: b.length,
-                aspectRatio: b.aspectRatio
-              }));
-
-              if (isPaintingRef.current && hoverPosRef.current) {
-                const mouseScaleX = trailCanvas.width / w;
-                const mouseScaleY = trailCanvas.height / h;
-                const mX = hoverPosRef.current.x * mouseScaleX;
-                const mY = hoverPosRef.current.y * mouseScaleY;
-                const closeToExisting = currentBlobs.some(b => Math.hypot(b.x - mX, b.y - mY) < 15);
-                if (!closeToExisting) {
-                  currentBlobs.push({
-                    x: mX,
-                    y: mY,
-                    angle: 0,
-                    length: 100,
-                    aspectRatio: 2.0
-                  });
-                }
-              }
-
-              const maxMatchDistance = 100;
-              trackedPointsRef.current = matchTrackedPoints(
-                currentBlobs,
-                trackedPointsRef.current,
-                maxMatchDistance,
-                now,
-                () => nextTrackedIdRef.current++
-              );
-
-              const patternWidth = patternCanvas.width;
-              const patternHeight = patternCanvas.height;
-              const imgData = poiPatternDataRef.current;
-
-              if (imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
-                const povCanvas = povCanvasRef.current;
-                const povCtx = povCanvas ? povCanvas.getContext('2d') : null;
-
-                // Clear canvas immediately if key settings change
-                const settingsStr = `${currentSettings.poiPatternType}-${currentSettings.poiWidth}-${currentSettings.poiOrientation}-${currentSettings.poiGlowEnabled}-${currentSettings.poiGlowRadius}`;
-                if (lastSettingsStrRef.current !== settingsStr) {
-                  lastSettingsStrRef.current = settingsStr;
-                  if (povCtx && povCanvas) {
-                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
-                  }
-                }
-
-                const povRetention = currentSettings.poiPovRetention || 400;
-                const povFadeMode = currentSettings.poiPovFadeMode || 'exponential';
-                const columnSpacing = currentSettings.poiPovColumnSpacing || 3;
-                const motionMode = currentSettings.poiPovMotionMode || 'free';
-                const glowEnabled = currentSettings.poiGlowEnabled;
-                const glowRadius = currentSettings.poiGlowRadius || 6;
-                const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
-                const ledCountOverride = currentSettings.poiLedCount || 0;
-
-                // Advance global column index
-                poiColumnIndexRef.current = (poiColumnIndexRef.current + currentSettings.poiSpeedMultiplier) % patternWidth;
-
-                // 1. Process active tracked points to update trail buffers
-                for (const tp of trackedPointsRef.current) {
-                  if (tp.lastSeen !== now) continue;
-
-                  // Frame skip interval
-                  const frameInterval = currentSettings.poiFrameInterval || 1;
-                  if (tp.envelopeFrame % frameInterval !== 0) continue;
-
-                  // Envelope opacity (existing ADSR logic)
-                  const T_in = currentSettings.poiFadeInTime || 0;
-                  const T_hold = currentSettings.poiHoldTime || 0;
-                  const T_out = currentSettings.poiFadeOutTime || 0;
-                  const T_wait = currentSettings.poiWaitTime || 0;
-                  const T_total = T_in + T_hold + T_out + T_wait;
-
-                  let envelopeFactor = 1.0;
-                  if (T_total > 0) {
-                    const frameInCycle = tp.envelopeFrame % T_total;
-                    if (frameInCycle < T_in) {
-                      envelopeFactor = T_in > 0 ? frameInCycle / T_in : 1.0;
-                    }
-                    else if (frameInCycle < T_in + T_hold) {
-                      envelopeFactor = 1.0;
-                    }
-                    else if (frameInCycle < T_in + T_hold + T_out) {
-                      const progress = frameInCycle - (T_in + T_hold);
-                      envelopeFactor = T_out > 0 ? 1.0 - (progress / T_out) : 0.0;
-                    }
-                    else {
-                      envelopeFactor = 0.0;
-                    }
-                  }
-
-                  const baseOpacity = currentSettings.poiOpacity !== undefined ? currentSettings.poiOpacity : 1.0;
-                  const finalOpacity = baseOpacity * envelopeFactor;
-
-                  if (finalOpacity <= 0.01) {
-                    continue;
-                  }
-
-                  const L = currentSettings.poiHeight;
-                  const W = currentSettings.poiWidth;
-                  const orientation = currentSettings.poiOrientation;
-                  const finalL = L > 0 ? L : tp.length;
-
-                  // === Determine column index ===
-                  let colIdx = 0;
-                  const mappingMode = currentSettings.poiMappingMode || 'time';
-                  if (mappingMode === 'time') {
-                    colIdx = Math.floor(poiColumnIndexRef.current) % patternWidth;
-                  } else if (mappingMode === 'angle') {
-                    const normalizedAngle = (tp.angle + Math.PI) / (Math.PI * 2);
-                    colIdx = Math.floor(normalizedAngle * patternWidth) % patternWidth;
-                    if (colIdx < 0) colIdx += patternWidth;
-                  } else if (mappingMode === 'spatial') {
-                    const spatialScale = 0.5;
-                    colIdx = Math.floor(tp.x * spatialScale) % patternWidth;
-                    if (colIdx < 0) colIdx += patternWidth;
-                  }
-
-                  if (usePov) {
-                    // === NEW POV MODE (refactored sampling) ===
-                    const trail = poiTrailBufferRef.current.get(tp.id) || [];
-
-                    const samples: PovSample[] = samplePovColumns({
-                      id: tp.id,
-                      x: tp.x,
-                      y: tp.y,
-                      prevX: tp.prevX,
-                      prevY: tp.prevY,
-                      angle: tp.angle,
-                      length: finalL,
-                      opacity: finalOpacity,
-                      timestamp: now,
-                      colIdx,
-                      motionMode: motionMode as 'circular' | 'free',
-                      circularCenter: {
-                        x: currentSettings.poiCenterRelativeX * trailCanvas.width,
-                        y: currentSettings.poiCenterRelativeY * trailCanvas.height,
-                      },
-                      columnSpacing,
-                      patternWidth,
-                      projectionState: (
-                        poiProjectionStateRef.current.get(tp.id)
-                        || createPovProjectionState()
-                      ),
-                      existingTrail: trail,
-                    });
-
-                    if (samples.length > 0) {
-                      poiProjectionStateRef.current.set(tp.id, samples[samples.length - 1].state);
-                      for (const s of samples) {
-                        trail.push({
-                          x: s.x,
-                          y: s.y,
-                          angle: s.angle,
-                          colIdx: s.colIdx,
-                          length: s.length,
-                          opacity: s.opacity,
-                          timestamp: s.timestamp,
-                        });
-                      }
-                      poiTrailBufferRef.current.set(tp.id, trail);
-                    }
-
-                    while (trail.length > 500) {
-                      trail.shift();
-                    }
-                  } else {
-                    // === LEGACY MODE (original single-column painting) ===
-                    const renderMode = currentSettings.poiRenderMode || 'dots';
-                    const drawLEDs = (
-                      drawDot: (y_rel: number, colorStr: string) => void
-                    ) => {
-                      const numLEDsLegacy = Math.max(5, Math.floor(finalL / 8));
-                      const px = colIdx % patternWidth;
-                      const data = imgData.data;
-
-                      for (let i = 0; i < numLEDsLegacy; i++) {
-                        const y_ratio = numLEDsLegacy > 1 ? i / (numLEDsLegacy - 1) : 0.5;
-                        const y_rel = -finalL / 2 + y_ratio * finalL;
-                        
-                        const py = Math.floor(y_ratio * (patternHeight - 1));
-                        const idx = (py * patternWidth + px) * 4;
-                        const r = data[idx];
-                        const g = data[idx+1];
-                        const b = data[idx+2];
-                        const a = data[idx+3];
-
-                        if (a > 15) {
-                          const colorStr = `rgba(${r}, ${g}, ${b}, ${(a / 255) * finalOpacity})`;
-                          drawDot(y_rel, colorStr);
-                        }
-                      }
-                    };
-
-                    trailCtx.save();
-                    trailCtx.globalAlpha = finalOpacity;
-
-                    if (orientation === 'vertical') {
-                      if (renderMode === 'dots') {
-                        drawLEDs((y_rel, colorStr) => {
-                          trailCtx.fillStyle = colorStr;
-                          trailCtx.beginPath();
-                          trailCtx.arc(tp.x, tp.y + y_rel, W / 2, 0, Math.PI * 2);
-                          trailCtx.fill();
-                        });
-                      } else {
-                        trailCtx.drawImage(
-                          patternCanvas,
-                          colIdx, 0, 1, patternCanvas.height,
-                          tp.x - W / 2, tp.y - finalL / 2, W, finalL
-                        );
-                      }
-                    }
-                    else if (orientation === 'horizontal') {
-                      if (renderMode === 'dots') {
-                        drawLEDs((y_rel, colorStr) => {
-                          trailCtx.fillStyle = colorStr;
-                          trailCtx.beginPath();
-                          trailCtx.arc(tp.x + y_rel, tp.y, W / 2, 0, Math.PI * 2);
-                          trailCtx.fill();
-                        });
-                      } else {
-                        trailCtx.drawImage(
-                          patternCanvas,
-                          colIdx, 0, 1, patternCanvas.height,
-                          tp.x - finalL / 2, tp.y - W / 2, finalL, W
-                        );
-                      }
-                    }
-                    else if (orientation === 'motion') {
-                      let angle = 0;
-                      if (tp.prevX !== undefined && tp.prevY !== undefined) {
-                        const dx = tp.x - tp.prevX;
-                        const dy = tp.y - tp.prevY;
-                        if (Math.hypot(dx, dy) > 2) {
-                          angle = Math.atan2(dy, dx) + Math.PI / 2;
-                        }
-                      }
-                      trailCtx.translate(tp.x, tp.y);
-                      trailCtx.rotate(angle);
-                      if (renderMode === 'dots') {
-                        drawLEDs((y_rel, colorStr) => {
-                          trailCtx.fillStyle = colorStr;
-                          trailCtx.beginPath();
-                          trailCtx.arc(0, y_rel, W / 2, 0, Math.PI * 2);
-                          trailCtx.fill();
-                        });
-                      } else {
-                        trailCtx.drawImage(
-                          patternCanvas,
-                          colIdx, 0, 1, patternCanvas.height,
-                          -W / 2, -finalL / 2, W, finalL
-                        );
-                      }
-                    }
-                    else if (orientation === 'radial') {
-                      const cx = currentSettings.poiCenterRelativeX * trailCanvas.width;
-                      const cy = currentSettings.poiCenterRelativeY * trailCanvas.height;
-                      const angle = Math.atan2(tp.y - cy, tp.x - cx);
-
-                      trailCtx.translate(tp.x, tp.y);
-                      trailCtx.rotate(angle);
-                      if (renderMode === 'dots') {
-                        drawLEDs((y_rel, colorStr) => {
-                          trailCtx.fillStyle = colorStr;
-                          trailCtx.beginPath();
-                          trailCtx.arc(0, y_rel, W / 2, 0, Math.PI * 2);
-                          trailCtx.fill();
-                        });
-                      } else {
-                        trailCtx.drawImage(
-                          patternCanvas,
-                          colIdx, 0, 1, patternCanvas.height,
-                          -W / 2, -finalL / 2, W, finalL
-                        );
-                      }
-                    }
-                    else if (orientation === 'club') {
-                      trailCtx.translate(tp.x, tp.y);
-                      trailCtx.rotate(tp.angle);
-                      if (renderMode === 'dots') {
-                        drawLEDs((y_rel, colorStr) => {
-                          trailCtx.fillStyle = colorStr;
-                          trailCtx.beginPath();
-                          trailCtx.arc(0, y_rel, W / 2, 0, Math.PI * 2);
-                          trailCtx.fill();
-                        });
-                      } else {
-                        trailCtx.drawImage(
-                          patternCanvas,
-                          colIdx, 0, 1, patternCanvas.height,
-                          -W / 2, -finalL / 2, W, finalL
-                        );
-                      }
-                    }
-
-                    trailCtx.restore();
-                  }
-                }
-
-                // 2. Render all visible trails in the buffer (POV mode)
-                if (usePov && povCanvasRef.current) {
-                  const povCanvas = povCanvasRef.current;
-                  const povCtx = povCanvas.getContext('2d');
-                  if (povCtx) {
-                    povCtx.clearRect(0, 0, povCanvas.width, povCanvas.height);
-
-                    const W = currentSettings.poiWidth;
-                    const orientation = currentSettings.poiOrientation;
-
-                    for (const [id, trail] of poiTrailBufferRef.current) {
-                      // Evict old entries
-                      const cutoff = now - povRetention;
-                      while (trail.length > 0 && trail[0].timestamp < cutoff) {
-                        trail.shift();
-                      }
-
-                      if (trail.length === 0) {
-                        poiTrailBufferRef.current.delete(id);
-                        poiAccumulatedDistRef.current.delete(id);
-                        continue;
-                      }
-
-                      const cx = currentSettings.poiCenterRelativeX * povCanvas.width;
-                      const cy = currentSettings.poiCenterRelativeY * povCanvas.height;
-
-                      for (const entry of trail) {
-                        const age = now - entry.timestamp;
-                        let fadeFactor = 1.0;
-                        if (povFadeMode === 'linear') {
-                          fadeFactor = 1.0 - (age / povRetention);
-                        } else if (povFadeMode === 'exponential') {
-                          fadeFactor = Math.pow(1.0 - (age / povRetention), 2.5);
-                        } else if (povFadeMode === 'sharp') {
-                          fadeFactor = age < povRetention * 0.8 ? 1.0 : (1.0 - (age - povRetention * 0.8) / (povRetention * 0.2));
-                        }
-                        fadeFactor = Math.max(0, Math.min(1, fadeFactor));
-                        const entryOpacity = entry.opacity * fadeFactor;
-                        if (entryOpacity <= 0.01) continue;
-
-                        const geom = calculateLedStripGeometry(
-                          entry.x,
-                          entry.y,
-                          entry.angle,
-                          entry.length,
-                          entry.motionAngle,
-                          orientation,
-                          cx,
-                          cy,
-                          motionMode as 'circular' | 'free'
-                        );
-
-                        povCtx.save();
-
-                        if (geom.isRadialOrCircular) {
-                          povCtx.translate(geom.translateX, geom.translateY);
-                          povCtx.rotate(geom.rotationAngle);
-                          povCtx.translate(0, geom.middleOffset);
-                        } else {
-                          povCtx.translate(geom.translateX, geom.translateY);
-                          povCtx.rotate(geom.rotationAngle);
-                        }
-
-                        const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
-
-                        drawLedColumn(
-                          povCtx, imgData, entry.colIdx, numLEDs, entry.length, W, entryOpacity
-                        );
-
-                        povCtx.restore();
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          } else {
-            trackedPointsRef.current = [];
-            trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
-          }
-          trailCtx.filter = 'none';
-        }
-
-        // Determine blend mode (fallback to 'screen' if compositeMode is 'none')
-        const blendMode = (currentSettings.compositeMode === 'none' || !currentSettings.compositeMode)
-          ? 'screen'
-          : currentSettings.compositeMode;
-
-        ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
-        ctx.drawImage(trailCanvas, 0, 0, w, h);
-        if (usePov && povCanvasRef.current) {
-          const povCanvas = povCanvasRef.current;
-          const glowEnabled = currentSettings.poiGlowEnabled;
-          const glowRadius = currentSettings.poiGlowRadius || 6;
-          const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
-
-          // 1. Glow pass
-          if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.filter = `blur(${glowRadius}px)`;
-            ctx.globalAlpha = glowIntensity;
-            ctx.drawImage(povCanvas, 0, 0, w, h);
-            ctx.restore();
-          }
-          // 2. Core pass
-          ctx.save();
-          ctx.drawImage(povCanvas, 0, 0, w, h);
-          ctx.restore();
-        }
-        ctx.globalCompositeOperation = 'source-over';
-      } else {
-        trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-      }
-
-      // Draw debug binary mask overlay if enabled
       drawDebugOverlay(ctx, procCanvas, w, h, currentSettings.showDebugFeed);
 
-      // Compute FPS
       const fpsResult = updateFpsCounter(now, lastTimeRef.current, frameCountRef.current, setFps);
       lastTimeRef.current = fpsResult.nextLastTime;
       frameCountRef.current = fpsResult.nextFrameCount;
 
-      // Draw Clone Stamp brush and source offset preview if enabled and hovering
       if (currentSettings.cloneStampEnabled && isHoveringRef.current && hoverPosRef.current && ctx) {
         drawCloneStampPreview(
           ctx,
@@ -1617,7 +1053,6 @@ export default function TrackingCanvas() {
         );
       }
 
-      // Draw Center of Rotation radial helper if enabled, in radial mode, the settings tab is active, and not exporting/recording
       if (currentSettings.enablePoiMode && 
           currentSettings.poiOrientation === 'radial' && 
           activeTabRef.current === 'poi' && 
@@ -1630,13 +1065,12 @@ export default function TrackingCanvas() {
         );
       }
 
-      animationFrameIdRef.current = requestAnimationFrame(render);
+      scheduleNextFrame(animationFrameIdRef, render);
     };
 
     render();
   }
 
-  // Video recording controls
   async function startRecording() {
     const canvas = displayCanvasRef.current;
     if (!canvas) return;
@@ -1645,11 +1079,9 @@ export default function TrackingCanvas() {
     setRecordingSeconds(0);
     recordedChunksRef.current = [];
 
-    // Capture the processed canvas stream at the user's selected frame rate
     const targetFps = settings.exportFps || 30;
     const stream = canvas.captureStream(targetFps);
 
-    // Request audio stream from user mic if enabled
     if (settings.enableAudioSync) {
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1661,12 +1093,11 @@ export default function TrackingCanvas() {
       }
     }
 
-    // Initialize media recorder with selected bitrate and codec options
     const bitrates = {
-      ultra: 30000000,   // 30 Mbps
-      high: 15000000,    // 15 Mbps
-      medium: 8000000,   // 8 Mbps
-      standard: 4000000, // 4 Mbps
+      ultra: 30000000,
+      high: 15000000,
+      medium: 8000000,
+      standard: 4000000,
     };
     const targetBitrate = bitrates[settings.exportQuality] || 15000000;
     const selectedMime = settings.exportMimeType || 'video/webm';
@@ -1680,7 +1111,6 @@ export default function TrackingCanvas() {
     try {
       recorder = new MediaRecorder(stream, options);
     } catch (e) {
-      console.warn('Selected encoding parameters not supported, trying mimeType only:', e);
       try {
         recorder = new MediaRecorder(stream, { mimeType: selectedMime });
       } catch (e2) {
@@ -1697,7 +1127,6 @@ export default function TrackingCanvas() {
     recorder.onstop = () => {
       const mimeType = recorder.mimeType || selectedMime;
       
-      // Determine the extension based on recorded mimeType
       let ext = 'webm';
       if (mimeType.includes('mp4')) {
         ext = 'mp4';
@@ -1724,7 +1153,6 @@ export default function TrackingCanvas() {
     }
   }
 
-  // Full screen toggle helper
   function toggleFullscreen() {
     const container = containerRef.current;
     if (!container) return;
@@ -1739,7 +1167,6 @@ export default function TrackingCanvas() {
     }
   }
 
-  // Tuner settings configurations for the responsive phone quick-slider overlay
   const tunerSettings = [
     {
       key: 'echoFadeRate',
@@ -1809,7 +1236,6 @@ export default function TrackingCanvas() {
     }
   ];
 
-  // Dynamic visual indicator styling (higher setting = more colorful/glowing, lower/off = grayed out)
   const getSettingColor = (key: string) => {
     switch (key) {
       case 'echoFadeRate': {
@@ -1854,410 +1280,111 @@ export default function TrackingCanvas() {
       onDrop={handleDrop}
     >
       {/* 1. Main Interactive Camera Viewport */}
-      
-        <div
-          ref={containerRef}
-          className={`absolute inset-0 z-0 bg-black flex items-center justify-center transition-all duration-300 ${
-            isFullscreen ? 'fixed inset-0 z-50' : ''
-          }`}
-        >
-          {/* Unused raw video element (hidden offscreen, feed processed on canvas) */}
-          <video
-            ref={videoRef}
-            className="hidden"
-            playsInline
-            muted
-            crossOrigin="anonymous"
-            onDurationChange={handleDurationChange}
-            onTimeUpdate={handleTimeUpdate}
-            onPlay={handlePlay}
-            onPause={handlePause}
-            onSeeked={handleSeeked}
-          />
+      <div
+        ref={containerRef}
+        className={`absolute inset-0 z-0 bg-black flex items-center justify-center transition-all duration-300 ${
+          isFullscreen ? 'fixed inset-0 z-50' : ''
+        }`}
+      >
+        {/* Hidden video element */}
+        <video
+          ref={videoRef}
+          className="hidden"
+          playsInline
+          muted
+          crossOrigin="anonymous"
+          onDurationChange={handleDurationChange}
+          onTimeUpdate={handleTimeUpdate}
+          onPlay={handlePlay}
+          onPause={handlePause}
+          onSeeked={handleSeeked}
+        />
 
-          {/* Actual display canvas which merges raw camera + effects overlay */}
-          <canvas
-            ref={displayCanvasRef}
-            className={`w-full h-full object-contain cursor-crosshair ${cameraActive ? 'block' : 'hidden'}`}
-            id="effects-viewport"
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-          />
+        {/* Display canvas */}
+        <canvas
+          ref={displayCanvasRef}
+          className={`w-full h-full object-contain cursor-crosshair ${cameraActive ? 'block' : 'hidden'}`}
+          id="effects-viewport"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+        />
 
-          {isDragging && cameraActive && (
-            <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-              <div className="bg-blue-600 text-white px-8 py-4 rounded-full font-medium shadow-2xl scale-110">
-                 Drop video to load
-              </div>
+        {isDragging && cameraActive && (
+          <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+            <div className="bg-blue-600 text-white px-8 py-4 rounded-full font-medium shadow-2xl scale-110">
+              Drop video to load
             </div>
-          )}
+          </div>
+        )}
 
-          {!cameraActive && (
-            <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center p-8 text-center w-[400px] max-w-[90vw] gap-4 backdrop-blur-xl shadow-2xl rounded transition-all duration-200 border ${
-              isDragging ? 'bg-blue-900/40 border-blue-500 scale-105' : 'bg-neutral-900/95 border-neutral-800'
-            }`}>
-              <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center text-blue-400 border border-neutral-700/50">
-                {videoSourceMode === 'camera' ? (
-                  <Camera className="w-8 h-8 animate-pulse" />
-                ) : (
-                  <Play className="w-8 h-8 animate-pulse ml-1" />
-                )}
-              </div>
-              <div>
-                <h3 className="font-sans font-semibold text-lg text-neutral-200">
-                  Ready to Start Juggling
-                </h3>
-                <p className="text-sm text-neutral-400 mt-1">
-                  Connect your webcam or upload a video to unlock trailing and trajectory mapping.
-                </p>
-              </div>
-
-              <div className="w-full flex bg-neutral-950 p-1 rounded-sm border border-neutral-800 mt-2">
-                <button
-                  onClick={() => setVideoSourceMode('camera')}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                    videoSourceMode === 'camera'
-                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
-                  }`}
-                >
-                  Live Camera
-                </button>
-                <button
-                  onClick={() => setVideoSourceMode('file')}
-                  className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                    videoSourceMode === 'file'
-                      ? 'bg-blue-500/10 text-blue-400 border border-neutral-700/50 shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-300 border border-transparent'
-                  }`}
-                >
-                  Upload Video
-                </button>
-              </div>
-
-              {videoSourceMode === 'camera' ? (
-                devices.length > 0 ? (
-                  <div className="w-full flex flex-col gap-2">
-                    <select
-                      value={selectedDeviceId}
-                      onChange={(e) => setSelectedDeviceId(e.target.value)}
-                      className="w-full bg-neutral-800 text-sm text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
-                    >
-                      {devices.map((device) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {device.label || `Camera ${devices.indexOf(device) + 1}`}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      onClick={startCamera}
-                      disabled={cameraLoading}
-                      className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50"
-                    >
-                      {cameraLoading ? 'Starting Stream...' : 'Initialize Camera'}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-xs text-rose-400 font-mono">
-                    No video devices detected. Please verify your camera is connected.
-                  </p>
-                )
-              ) : (
-                <div className="w-full flex flex-col gap-3">
-                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
-                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Quick Test</span>
-                    <button
-                      onClick={loadDemoVideo}
-                      className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-2 border ${
-                        isDemoSelected 
-                          ? 'bg-blue-500/15 text-blue-400 border-blue-500/40 shadow-sm shadow-blue-500/5' 
-                          : 'bg-neutral-800/60 text-neutral-300 border-neutral-700/50 hover:bg-neutral-800 hover:text-white'
-                      }`}
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                      {isDemoSelected ? 'Demo Video Selected' : 'Load Demo Juggling Video'}
-                    </button>
-                  </div>
-
-                  <div className="relative flex py-1 items-center justify-center">
-                    <div className="flex-grow border-t border-neutral-800/60"></div>
-                    <span className="flex-shrink mx-3 text-[10px] text-neutral-500 font-mono tracking-widest">OR</span>
-                    <div className="flex-grow border-t border-neutral-800/60"></div>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5 p-3 bg-neutral-900/60 border border-neutral-800/80 rounded-lg">
-                    <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">Upload Your Own</span>
-                    <input 
-                      type="file" 
-                      accept="video/*" 
-                      onChange={handleFileSelected} 
-                      className="w-full text-xs text-neutral-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-neutral-800 file:text-neutral-300 hover:file:bg-neutral-700 hover:file:text-white file:cursor-pointer cursor-pointer"
-                    />
-                  </div>
-
-                  <button
-                    onClick={startCamera}
-                    disabled={cameraLoading || !videoFileUrl}
-                    className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] transition-all py-2.5 px-4 rounded-lg font-sans font-medium text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-blue-500/10 disabled:opacity-50 mt-1"
-                  >
-                    {cameraLoading ? 'Starting Video...' : 'Play Video'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Floaters overlays when Camera is Active */}
-          <CanvasHud
-            cameraActive={cameraActive}
-            isSidebarOpen={isSidebarOpen}
-            fps={fps}
-            settings={settings}
-            supportedMimeTypes={supportedMimeTypes}
-            isFullscreen={isFullscreen}
+        {!cameraActive && (
+          <VideoSourceSetup
+            isDragging={isDragging}
             videoSourceMode={videoSourceMode}
-            isPaused={isPaused}
-            currentTime={currentTime}
-            duration={duration}
-            isRecording={isRecording}
-            recordingSeconds={recordingSeconds}
-            exportConfigured={exportConfigured}
-            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-            onToggleFullscreen={toggleFullscreen}
-            onStopCamera={stopCamera}
-            onTogglePlay={handleTogglePlay}
-            onScrubChange={handleScrubChange}
-            onScrubStart={handleScrubStart}
-            onScrubEnd={handleScrubEnd}
-            onClearTrails={handleClearTrails}
-            onStopRecording={stopRecording}
-            onShowExportModal={setShowExportModal}
-            onStartRecording={startRecording}
+            setVideoSourceMode={setVideoSourceMode}
+            devices={devices}
+            selectedDeviceId={selectedDeviceId}
+            setSelectedDeviceId={setSelectedDeviceId}
+            cameraLoading={cameraLoading}
+            startCamera={startCamera}
+            loadDemoVideo={loadDemoVideo}
+            isDemoSelected={isDemoSelected}
+            handleFileSelected={handleFileSelected}
+            videoFileUrl={videoFileUrl}
           />
-        </div>
+        )}
 
-        {/* Calibration Instructions (Hidden in Pro Layout) */}
-        <div className="hidden">
-        <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex gap-3.5 items-start">
-          <div className="p-2 bg-blue-500/10 rounded-sm text-blue-400 border border-neutral-700/50 mt-0.5 shrink-0">
-            <Info className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-sans font-medium text-sm text-neutral-200">
-              Calibration & Setup Guide
-            </h4>
-            <p className="text-xs text-neutral-400 leading-relaxed mt-1">
-              {settings.trackingMode === 'color' 
-                ? "Select a neon ball preset on the right, or click directly on any juggling ball in the camera view to track its custom color. For best results, use bright balls on a contrasting background."
-                : "Motion detection tracks any moving object regardless of color. For best results, ensure your camera is completely stable and you're juggling against a solid background."}
-            </p>
-          </div>
-        </div>
-        </div>
+        {/* Floating HUD overlays when Camera is Active */}
+        <CanvasHud
+          cameraActive={cameraActive}
+          isSidebarOpen={isSidebarOpen}
+          fps={fps}
+          settings={settings}
+          supportedMimeTypes={supportedMimeTypes}
+          isFullscreen={isFullscreen}
+          videoSourceMode={videoSourceMode}
+          isPaused={isPaused}
+          currentTime={currentTime}
+          duration={duration}
+          isRecording={isRecording}
+          recordingSeconds={recordingSeconds}
+          exportConfigured={exportConfigured}
+          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          onToggleFullscreen={toggleFullscreen}
+          onStopCamera={stopCamera}
+          onTogglePlay={handleTogglePlay}
+          onScrubChange={handleScrubChange}
+          onScrubStart={handleScrubStart}
+          onScrubEnd={handleScrubEnd}
+          onClearTrails={handleClearTrails}
+          onStopRecording={stopRecording}
+          onShowExportModal={setShowExportModal}
+          onStartRecording={startRecording}
+        />
+      </div>
 
-        {/* Export Settings Modal */}
-        <AnimatePresence>
-          {showExportModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 pointer-events-auto"
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-xl p-6 flex flex-col gap-5 shadow-2xl font-sans"
-              >
-                <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-blue-400" />
-                    <h3 className="font-semibold text-sm text-neutral-200">
-                      Configure Export Quality
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setShowExportModal(false)}
-                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
+      {/* Export Settings Modal */}
+      <ExportModal
+        showExportModal={showExportModal}
+        setShowExportModal={setShowExportModal}
+        settings={settings}
+        setSettings={setSettings}
+        supportedMimeTypes={supportedMimeTypes}
+        setExportConfigured={setExportConfigured}
+        startRecording={startRecording}
+      />
 
-                <div className="flex flex-col gap-4 font-sans">
-                  {/* Export Framerate */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Export Framerate</span>
-                      <span className="text-[10px] text-neutral-500">60 FPS is smoother; 30 FPS has higher compatibility.</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 mt-1">
-                      {[30, 60].map((fpsVal) => (
-                        <button
-                          key={fpsVal}
-                          type="button"
-                          onClick={() => setSettings((prev) => ({ ...prev, exportFps: fpsVal as 30 | 60 }))}
-                          className={`py-2 rounded-lg text-xs font-mono font-medium transition-all ${
-                            settings.exportFps === fpsVal
-                              ? 'bg-blue-600 text-white border border-blue-500 shadow-md shadow-blue-500/10'
-                              : 'bg-neutral-800 text-neutral-400 border border-neutral-700/50 hover:bg-neutral-750'
-                          }`}
-                        >
-                          {fpsVal} FPS
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Export Quality / Bitrate */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Export Quality (Bitrate)</span>
-                      <span className="text-[10px] text-neutral-500">Higher bitrates prevent pixelation in high motion.</span>
-                    </div>
-                    <select
-                      value={settings.exportQuality}
-                      onChange={(e) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          exportQuality: e.target.value as 'standard' | 'medium' | 'high' | 'ultra',
-                        }))
-                      }
-                      className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
-                    >
-                      <option value="ultra">Ultra (30 Mbps - Lossless/Huge)</option>
-                      <option value="high">High (15 Mbps - Premium/Clear)</option>
-                      <option value="medium">Medium (8 Mbps - Balanced)</option>
-                      <option value="standard">Standard (4 Mbps - Compact)</option>
-                    </select>
-                  </div>
-
-                  {/* Container & Codec format */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-neutral-400 font-medium">Container & Codec</span>
-                      <span className="text-[10px] text-neutral-500">Detected formats supported by your browser.</span>
-                    </div>
-                    {supportedMimeTypes.length > 0 ? (
-                      <select
-                        value={settings.exportMimeType}
-                        onChange={(e) =>
-                          setSettings((prev) => ({ ...prev, exportMimeType: e.target.value }))
-                        }
-                        className="w-full bg-neutral-850 text-xs text-neutral-200 border border-neutral-700 px-3 py-2.5 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all font-sans"
-                      >
-                        {supportedMimeTypes.map((t) => (
-                          <option key={t.mimeType} value={t.mimeType}>
-                            {t.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="text-[10px] text-red-400 font-medium bg-red-950/20 border border-red-900/50 p-2 rounded">
-                        No supported recording codecs detected.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex gap-2.5 border-t border-neutral-800 pt-4 mt-1 font-sans">
-                  <button
-                    onClick={() => {
-                      setExportConfigured(true);
-                      setShowExportModal(false);
-                    }}
-                    className="flex-1 bg-neutral-800 hover:bg-neutral-750 text-neutral-300 py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98]"
-                  >
-                    Save Settings
-                  </button>
-                  <button
-                    onClick={() => {
-                      setExportConfigured(true);
-                      setShowExportModal(false);
-                      setTimeout(() => startRecording(), 100);
-                    }}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium text-xs transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
-                  >
-                    Apply & Start
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 3. Exported Video Preview / Download Card */}
-        <AnimatePresence>
-          {recordedVideoUrl && (
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 15 }}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] max-w-[90vw] bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4 shadow-2xl z-50"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <h3 className="font-sans font-semibold text-sm text-neutral-200">
-                    Recorded Video Export Ready
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setRecordedVideoUrl(null)}
-                  className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
-                >
-                  Dismiss
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                <div className="md:col-span-8 overflow-hidden rounded-sm bg-black border border-neutral-800 aspect-video">
-                  <video
-                    src={recordedVideoUrl}
-                    controls
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-
-                <div className="md:col-span-4 flex flex-col gap-3">
-                  <p className="text-xs text-neutral-400 leading-relaxed">
-                    This file contains the complete live performance with all trail lines, motion speeds,
-                    and trajectory curve mappings baked in.
-                  </p>
-
-                  <div className="bg-neutral-950/40 border border-neutral-800/80 rounded p-3 flex flex-col gap-2 font-mono text-[10px] text-neutral-400">
-                    <div className="flex justify-between">
-                      <span>Format:</span>
-                      <span className="text-neutral-200 uppercase">{recordedExt}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Duration:</span>
-                      <span className="text-neutral-200">{recordingSeconds}s</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>File Size:</span>
-                      <span className="text-neutral-200">{(recordedSize / (1024 * 1024)).toFixed(2)} MB</span>
-                    </div>
-                  </div>
-
-                  <a
-                    href={recordedVideoUrl}
-                    download={`juggling_tracking_${Date.now()}.${recordedExt}`}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-sans font-medium text-xs py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-lg shadow-blue-500/10"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download Video
-                  </a>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* Exported Video Preview / Download Card */}
+      <ExportPreviewModal
+        recordedVideoUrl={recordedVideoUrl}
+        setRecordedVideoUrl={setRecordedVideoUrl}
+        recordedExt={recordedExt}
+        recordingSeconds={recordingSeconds}
+        recordedSize={recordedSize}
+      />
 
       {/* Floating Settings toggle for when camera is not active */}
       {!cameraActive && !isSidebarOpen && (
@@ -2270,74 +1397,18 @@ export default function TrackingCanvas() {
         </button>
       )}
 
-      {/* 3. Pro Mode Mobile Tuner Overlay (only visible when camera is active and sidebar is closed) */}
-      {cameraActive && !isSidebarOpen && (
-        <div className="absolute bottom-28 left-4 right-4 z-20 pointer-events-none flex flex-col items-center gap-3 md:hidden">
-          <AnimatePresence>
-            {activeTunerKey && (() => {
-              const item = tunerSettings.find(s => s.key === activeTunerKey);
-              if (!item) return null;
-              const Icon = item.icon;
-              const value = item.getValue();
-              return (
-                <motion.div
-                  initial={{ opacity: 0, y: 12, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 12, scale: 0.95 }}
-                  transition={{ type: 'spring', damping: 20, stiffness: 180 }}
-                  className="bg-[#0a0a0a]/95 backdrop-blur-xl border border-neutral-800/80 rounded-2xl px-4 py-3.5 w-full max-w-[280px] flex flex-col gap-2.5 shadow-2xl pointer-events-auto font-sans"
-                >
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <div className="flex items-center gap-1.5 text-neutral-300">
-                      <Icon className="w-3.5 h-3.5 text-blue-400" />
-                      <span>{item.name}</span>
-                    </div>
-                    <span 
-                      className="font-mono text-[11px]"
-                      style={item.key === 'hueRotate' && settings.hueRotate > 0 ? { color: `hsl(${settings.hueRotate}, 85%, 65%)` } : { color: '#e5e5e5' }}
-                    >
-                      {item.format(value)}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={item.min}
-                    max={item.max}
-                    step={item.step}
-                    value={value}
-                    onChange={(e) => item.setValue(parseFloat(e.target.value))}
-                    className="w-full accent-blue-500 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer mt-1"
-                  />
-                </motion.div>
-              );
-            })()}
-          </AnimatePresence>
+      {/* Mobile Tuner Overlay */}
+      <MobileTunerOverlay
+        cameraActive={cameraActive}
+        isSidebarOpen={isSidebarOpen}
+        activeTunerKey={activeTunerKey}
+        setActiveTunerKey={setActiveTunerKey}
+        tunerSettings={tunerSettings}
+        getSettingColor={getSettingColor}
+        settings={settings}
+      />
 
-          <div className="bg-[#050505]/95 backdrop-blur-md border border-neutral-900 rounded-full px-2.5 py-1.5 flex items-center gap-2 shadow-2xl pointer-events-auto">
-            {tunerSettings.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTunerKey === item.key;
-              const colorClass = getSettingColor(item.key);
-              return (
-                <button
-                  key={item.key}
-                  onClick={() => setActiveTunerKey(isActive ? null : item.key)}
-                  className={`w-10 h-10 rounded-full border transition-all flex items-center justify-center cursor-pointer ${
-                    isActive 
-                      ? 'bg-blue-600 border-blue-500 text-white scale-110 shadow-lg shadow-blue-500/25 z-10' 
-                      : colorClass
-                  }`}
-                  style={item.key === 'hueRotate' && settings.hueRotate > 0 && !isActive ? { color: `hsl(${settings.hueRotate}, 85%, 65%)`, borderColor: `hsla(${settings.hueRotate}, 85%, 65%, 0.3)` } : undefined}
-                  title={item.name}
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      {/* 2. Control Panel Sidebar */}
+      {/* Control Panel Sidebar */}
       <SettingsDrawer
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
@@ -2369,6 +1440,7 @@ export default function TrackingCanvas() {
         removalMaskCanvasRef={removalMaskCanvasRef}
         startCamera={startCamera}
       />
+
       <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none' }}>
         <filter id="camera-adjustments">
           <feColorMatrix type="matrix" values={getAdjustmentMatrix()} />
