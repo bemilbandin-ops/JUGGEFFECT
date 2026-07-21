@@ -528,6 +528,13 @@ export function processTrails(params: TrailProcessorParams): void {
         }
       } else {
         trackedPointsRef.current = [];
+        if (povCanvasRef.current) {
+          const povCtx = povCanvasRef.current.getContext('2d');
+          if (povCtx) povCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+        }
+        poiTrailBufferRef.current.clear();
+        poiProjectionStateRef.current.clear();
+        poiAccumulatedDistRef.current.clear();
         trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
       }
       trailCtx.filter = 'none';
@@ -540,7 +547,7 @@ export function processTrails(params: TrailProcessorParams): void {
 
     ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
     ctx.drawImage(trailCanvas, 0, 0, w, h);
-    if (usePov && povCanvasRef.current) {
+    if (currentSettings.enablePoiMode && usePov && povCanvasRef.current) {
       const povCanvas = povCanvasRef.current;
       const glowEnabled = currentSettings.poiGlowEnabled;
       const glowRadius = currentSettings.poiGlowRadius || 6;
@@ -563,5 +570,12 @@ export function processTrails(params: TrailProcessorParams): void {
     ctx.globalCompositeOperation = 'source-over';
   } else {
     trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+    if (povCanvasRef.current) {
+      const povCtx = povCanvasRef.current.getContext('2d');
+      if (povCtx) povCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+    }
+    poiTrailBufferRef.current.clear();
+    poiProjectionStateRef.current.clear();
+    poiAccumulatedDistRef.current.clear();
   }
 }

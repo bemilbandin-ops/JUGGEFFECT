@@ -1,5 +1,7 @@
 export function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
+  if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
+  const totalSeconds = Math.floor(seconds);
+  const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+  const s = (totalSeconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }

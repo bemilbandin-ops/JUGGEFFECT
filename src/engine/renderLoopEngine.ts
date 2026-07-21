@@ -58,6 +58,7 @@ export interface ExecuteRenderLoopStepParams {
   frameCountAbsRef: React.MutableRefObject<number>;
   colorCycleAngleRef: React.MutableRefObject<number>;
   lastStrobeTimeRef: React.MutableRefObject<number>;
+  lastProcessedVideoTimeRef: React.MutableRefObject<number>;
   render: () => void;
 }
 
@@ -104,6 +105,7 @@ export function executeRenderLoopStep({
   frameCountAbsRef,
   colorCycleAngleRef,
   lastStrobeTimeRef,
+  lastProcessedVideoTimeRef,
   render,
 }: ExecuteRenderLoopStepParams): void {
   if (video.videoWidth === 0 || video.videoHeight === 0) {
@@ -164,7 +166,9 @@ export function executeRenderLoopStep({
     strobeVideoCtx,
   } = buffers;
 
-  if (video.paused || video.ended) {
+  const isTimeChanged = Math.abs(video.currentTime - lastProcessedVideoTimeRef.current) > 0.0001;
+
+  if ((video.paused || video.ended) && !isTimeChanged) {
     renderPausedFrame({
       video,
       stampedVideoCanvas,
@@ -179,6 +183,7 @@ export function executeRenderLoopStep({
       w,
       h,
       trailCanvasRef,
+      povCanvasRef,
       processingCanvasRef,
       isHoveringRef,
       hoverPosRef,
@@ -189,6 +194,8 @@ export function executeRenderLoopStep({
     });
     return;
   }
+
+  lastProcessedVideoTimeRef.current = video.currentTime;
 
   compositeCloneStamp({
     video,

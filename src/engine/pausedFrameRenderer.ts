@@ -19,6 +19,7 @@ export interface RenderPausedFrameParams {
   w: number;
   h: number;
   trailCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  povCanvasRef?: React.MutableRefObject<HTMLCanvasElement | null>;
   processingCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   isHoveringRef: React.MutableRefObject<boolean>;
   hoverPosRef: React.MutableRefObject<{ x: number; y: number } | null>;
@@ -43,6 +44,7 @@ export function renderPausedFrame(params: RenderPausedFrameParams): void {
     w,
     h,
     trailCanvasRef,
+    povCanvasRef,
     processingCanvasRef,
     isHoveringRef,
     hoverPosRef,
@@ -125,6 +127,24 @@ export function renderPausedFrame(params: RenderPausedFrameParams): void {
       : currentSettings.compositeMode;
     ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
     ctx.drawImage(trailCanvasRef.current, 0, 0, w, h);
+    if (currentSettings.enablePoiMode && povCanvasRef?.current) {
+      const povCanvas = povCanvasRef.current;
+      const glowEnabled = currentSettings.poiGlowEnabled;
+      const glowRadius = currentSettings.poiGlowRadius || 6;
+      const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
+
+      if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.filter = `blur(${glowRadius}px)`;
+        ctx.globalAlpha = glowIntensity;
+        ctx.drawImage(povCanvas, 0, 0, w, h);
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.drawImage(povCanvas, 0, 0, w, h);
+      ctx.restore();
+    }
     ctx.globalCompositeOperation = 'source-over';
   }
 

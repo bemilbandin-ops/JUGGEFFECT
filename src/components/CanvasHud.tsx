@@ -138,14 +138,14 @@ export default function CanvasHud({
             {/* Play/Pause Button */}
             <button
               onClick={onTogglePlay}
-              className="p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0"
+              className="p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition-colors active:scale-95 cursor-pointer flex items-center justify-center shrink-0 bg-neutral-800/50 border border-neutral-750"
               title={isPaused ? "Play" : "Pause"}
             >
-              {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
+              {isPaused ? <Play className="w-4 h-4 fill-current text-blue-400" /> : <Pause className="w-4 h-4 fill-current text-blue-400" />}
             </button>
 
             {/* Time Display */}
-            <span className="text-[11px] font-mono text-neutral-400 select-none shrink-0">
+            <span className="text-[11px] font-mono text-neutral-400 select-none shrink-0 min-w-[85px]">
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
 
@@ -153,15 +153,20 @@ export default function CanvasHud({
             <input
               type="range"
               min={0}
-              max={duration || 100}
-              step={0.05}
+              max={duration && !isNaN(duration) && duration > 0 ? duration : 100}
+              step={0.01}
               value={currentTime}
               onChange={onScrubChange}
               onMouseDown={onScrubStart}
               onTouchStart={onScrubStart}
               onMouseUp={onScrubEnd}
               onTouchEnd={onScrubEnd}
-              className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-neutral-800 appearance-none cursor-pointer hover:bg-neutral-750 transition-all [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+              style={{
+                background: duration > 0
+                  ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%, #262626 ${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%, #262626 100%)`
+                  : '#262626'
+              }}
+              className="flex-1 accent-blue-500 h-2 rounded-lg appearance-none cursor-pointer border border-neutral-800 transition-all [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-400 [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-110"
             />
 
             {/* Clear Trails Button */}

@@ -148,11 +148,6 @@ export function useVideoMediaController({
   const handleSeeked = () => {
     bgDataRef.current = null;
     motionMaskDataRef.current = null;
-    if (trailCanvasRef.current) {
-      const tCtx = trailCanvasRef.current.getContext('2d');
-      if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
-    }
-    trackedPointsRef.current = [];
   };
 
   const handleScrubChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -256,7 +251,11 @@ export function useVideoMediaController({
   function setupVideoPlayback() {
     if (!videoRef.current) return;
 
-    videoRef.current.onloadedmetadata = () => {
+    const onMetaLoaded = () => {
+      if (videoRef.current) {
+        setDuration(videoRef.current.duration || 0);
+        setCurrentTime(videoRef.current.currentTime || 0);
+      }
       bgDataRef.current = null;
       motionMaskDataRef.current = null;
       if (trailCanvasRef.current) {
@@ -270,12 +269,17 @@ export function useVideoMediaController({
       startRenderLoop();
     };
 
+    videoRef.current.onloadedmetadata = onMetaLoaded;
+
     videoRef.current
       .play()
       .then(() => {
         setCameraActive(true);
-        if (videoRef.current!.videoWidth > 0 && !animationFrameIdRef.current) {
-          videoRef.current!.onloadedmetadata = null;
+        if (videoRef.current) {
+          setDuration(videoRef.current.duration || 0);
+          setCurrentTime(videoRef.current.currentTime || 0);
+        }
+        if (videoRef.current && videoRef.current.videoWidth > 0 && !animationFrameIdRef.current) {
           bgDataRef.current = null;
           motionMaskDataRef.current = null;
           if (trailCanvasRef.current) {

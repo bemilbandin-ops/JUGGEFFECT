@@ -57,6 +57,7 @@ export function useTrackingRenderLoop() {
   const frameCountAbsRef = useRef<number>(0);
   const colorCycleAngleRef = useRef<number>(0);
   const lastStrobeTimeRef = useRef<number>(0);
+  const lastProcessedVideoTimeRef = useRef<number>(-1);
 
   // FPS & Viewport React state
   const [fps, setFps] = useState<number>(0);
@@ -220,6 +221,19 @@ export function useTrackingRenderLoop() {
   });
 
   const applyPreset = (presetId: string, presetSettings: Partial<TrackingSettings>) => {
+    if (trailCanvasRef.current) {
+      const tCtx = trailCanvasRef.current.getContext('2d');
+      if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
+    }
+    if (povCanvasRef.current) {
+      const pCtx = povCanvasRef.current.getContext('2d');
+      if (pCtx) pCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+    }
+    trackedPointsRef.current = [];
+    poiTrailBufferRef.current.clear();
+    poiProjectionStateRef.current.clear();
+    poiAccumulatedDistRef.current.clear();
+
     setSettings((prev) => {
       let base = originalSettings;
       if (!base) {
@@ -228,6 +242,7 @@ export function useTrackingRenderLoop() {
       }
       return {
         ...base,
+        enablePoiMode: false,
         ...presetSettings,
       };
     });
@@ -341,6 +356,7 @@ export function useTrackingRenderLoop() {
         frameCountAbsRef,
         colorCycleAngleRef,
         lastStrobeTimeRef,
+        lastProcessedVideoTimeRef,
         render,
       });
     };

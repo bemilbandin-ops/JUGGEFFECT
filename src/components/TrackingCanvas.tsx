@@ -105,10 +105,12 @@ export default function TrackingCanvas() {
           playsInline
           muted
           crossOrigin="anonymous"
+          onLoadedMetadata={handleDurationChange}
           onDurationChange={handleDurationChange}
           onTimeUpdate={handleTimeUpdate}
           onPlay={handlePlay}
           onPause={handlePause}
+          onEnded={handlePause}
           onSeeked={handleSeeked}
         />
 
