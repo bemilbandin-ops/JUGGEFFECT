@@ -53,9 +53,16 @@ export function renderPausedFrame(params: RenderPausedFrameParams): void {
     ctx.drawImage(trailCanvasRef.current, 0, 0, w, h);
     if (currentSettings.enablePoiMode && povCanvasRef?.current) {
       const povCanvas = povCanvasRef.current;
-      const glowEnabled = currentSettings.poiGlowEnabled;
-      const glowRadius = currentSettings.poiGlowRadius || 6;
-      const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
+      const isComet = currentSettings.pixelEffectMode === 'comets';
+      const glowEnabled = isComet
+        ? currentSettings.cometGlowIntensity > 0
+        : currentSettings.poiGlowEnabled;
+      const glowRadius = isComet
+        ? 2 + currentSettings.cometGlowIntensity * 6
+        : currentSettings.poiGlowRadius || 6;
+      const glowIntensity = isComet
+        ? currentSettings.cometGlowIntensity
+        : currentSettings.poiGlowIntensity || 0.5;
 
       if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
         ctx.save();

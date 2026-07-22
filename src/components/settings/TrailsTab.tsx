@@ -44,6 +44,22 @@ export default function TrailsTab({ settings, setSettings }: TrailsTabProps) {
           </label>
 
           <div className="flex flex-col gap-1.5 mt-2">
+            <span className="text-xs text-neutral-400">Trail Style</span>
+            <select
+              value={settings.trailEffectMode}
+              onChange={(e) => setSettings((prev) => ({
+                ...prev,
+                trailEffectMode: e.target.value as TrackingSettings['trailEffectMode'],
+              }))}
+              className="w-full bg-neutral-800 text-xs text-neutral-200 border border-neutral-700 px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-blue-500 transition-all"
+            >
+              <option value="standard">Echo Stamps</option>
+              <option value="light-painting">Swept Club Ribbons</option>
+              <option value="depth-tunnel">3D Club Tunnel</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex justify-between text-xs">
               <div className="flex flex-col">
                 <span className="text-neutral-400 flex items-center gap-1.5">

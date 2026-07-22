@@ -8,7 +8,44 @@ export interface PoiTabProps {
   setSettings: React.Dispatch<React.SetStateAction<TrackingSettings>>;
 }
 
+const COMET_CONTROLS = [
+  ['cometLifetimeMs', 'Particle Lifetime', 150, 1000, 25, 'ms'],
+  ['cometEmission', 'Emission Amount', 1, 6, 1, ''],
+  ['cometPixelSize', 'Pixel Size', 2, 12, 1, 'px'],
+  ['cometSpread', 'Spread', 0, 1, 0.05, ''],
+  ['cometInitialSpeed', 'Initial Speed', 0.4, 2, 0.1, 'x'],
+  ['cometDrag', 'Drag', 0.75, 0.99, 0.01, ''],
+  ['cometGlowIntensity', 'Glow Intensity', 0, 1, 0.05, ''],
+] as const;
+
+function CometControls({ settings, setSettings }: PoiTabProps) {
+  return (
+    <div className="flex flex-col gap-3 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
+      <span className="text-[10px] text-neutral-400 block font-medium">Pixel Comets</span>
+      {COMET_CONTROLS.map(([key, label, min, max, step, suffix]) => (
+        <div className="flex flex-col gap-1" key={key}>
+          <div className="flex justify-between text-[10px]">
+            <span className="text-neutral-500">{label}</span>
+            <span className="text-neutral-300 font-mono">{settings[key]}{suffix}</span>
+          </div>
+          <input
+            aria-label={label}
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={settings[key]}
+            onChange={(event) => setSettings((prev) => ({ ...prev, [key]: Number(event.target.value) }))}
+            className="w-full accent-fuchsia-500 h-1 bg-neutral-850 rounded-lg appearance-none cursor-pointer"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PoiTab({ settings, setSettings }: PoiTabProps) {
+  const isComet = settings.pixelEffectMode === 'comets';
   const usesPov = settings.poiPovEnabled ?? false;
   const usesCircularPov = usesPov && settings.poiPovMotionMode === 'circular';
 
@@ -85,6 +122,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 </div>
               )}
             </div>
+            {isComet ? <CometControls settings={settings} setSettings={setSettings} /> : <>
             <VariantSelector
               value={settings.poiPatternType}
               onChange={(e) =>
@@ -187,8 +225,6 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
               >
                 <option value="dots">Dotted LEDs (Discrete Points)</option>
                 <option value="solid" disabled={usesPov}>Solid Ribbon (Legacy Mode)</option>
-                <option value="comets" disabled={!usesPov}>Pixel Comets (Prop Tips)</option>
-                <option value="blocks" disabled={!usesPov}>Arcade Blocks (Screen Grid)</option>
               </select>
             </div>
 
@@ -535,6 +571,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 />
               </div>
             </div>
+            </>}
           </>
         )}
       </div>

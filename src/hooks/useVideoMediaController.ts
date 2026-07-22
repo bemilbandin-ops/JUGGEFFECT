@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TrackingSettings } from '../types';
+import type { PixelCometState } from '../engine/pixelCometProcessor';
 
 export interface UseVideoMediaControllerParams {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -14,6 +15,7 @@ export interface UseVideoMediaControllerParams {
   poiTrailBufferRef: React.MutableRefObject<Map<number, any>>;
   poiProjectionStateRef: React.MutableRefObject<Map<number, any>>;
   poiAccumulatedDistRef: React.MutableRefObject<Map<number, number>>;
+  pixelCometStateRef: React.MutableRefObject<PixelCometState>;
   settings: TrackingSettings;
   setFps: React.Dispatch<React.SetStateAction<number>>;
   setRecordedVideoUrl: (url: string | null) => void;
@@ -34,6 +36,7 @@ export function useVideoMediaController({
   poiTrailBufferRef,
   poiProjectionStateRef,
   poiAccumulatedDistRef,
+  pixelCometStateRef,
   settings,
   setFps,
   setRecordedVideoUrl,
@@ -198,6 +201,7 @@ export function useVideoMediaController({
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    pixelCometStateRef.current.clear();
     clearRendererTemporalState();
   };
 

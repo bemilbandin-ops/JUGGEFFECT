@@ -16,6 +16,7 @@ export interface TrackingSettings {
   enableLightTracking: boolean; // Toggle to filter by brightness
   lightThreshold: number; // Minimum brightness to track (0-255)
   echoFadeRate: number; // Trail fade speed for flow props
+  trailEffectMode: 'standard' | 'light-painting' | 'depth-tunnel';
   bgLearningRate: number;
   blurAmount: number;
   hueRotate: number;
@@ -58,7 +59,8 @@ export interface TrackingSettings {
   poiSpeedMultiplier: number;
   poiMaxPoints: number;
   poiMappingMode: 'time' | 'angle' | 'spatial';
-  poiRenderMode: 'solid' | 'dots' | 'comets' | 'blocks';
+  pixelEffectMode: 'pov' | 'comets';
+  poiRenderMode: 'solid' | 'dots';
   poiOpacity: number;
   poiFadeInTime: number;
   poiHoldTime: number;
@@ -75,5 +77,12 @@ export interface TrackingSettings {
   poiGlowRadius: number;            // Radius of the glow halo in pixels (e.g., 8)
   poiGlowIntensity: number;         // Glow brightness multiplier 0.0–1.0
   poiLedCount: number;              // Override number of simulated LEDs per column (0 = auto from club length)
+  cometLifetimeMs: number;
+  cometEmission: number;
+  cometPixelSize: number;
+  cometSpread: number;
+  cometInitialSpeed: number;
+  cometDrag: number;
+  cometGlowIntensity: number;
 }
 

@@ -15,6 +15,8 @@ import { drawCloneStampPreview } from './cloneStampOverlay';
 import { drawRadialCenterGuide } from './radialCenterGuide';
 import { scheduleNextFrame } from './frameScheduler';
 import { PovProjectionState, PovTrailEntry } from '../utils/pov';
+import type { PixelCometState } from './pixelCometProcessor';
+import type { LightPaintingState } from './lightPaintingProcessor';
 
 export interface ExecuteRenderLoopStepParams {
   video: HTMLVideoElement;
@@ -31,6 +33,7 @@ export interface ExecuteRenderLoopStepParams {
   smoothingCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   maskedBlurCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   driftCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  lightPaintingStateRef: React.MutableRefObject<LightPaintingState>;
   poiPatternCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   poiPatternDataRef: React.MutableRefObject<ImageData | null>;
   poiCustomImageElementRef: React.MutableRefObject<HTMLImageElement | null>;
@@ -45,6 +48,8 @@ export interface ExecuteRenderLoopStepParams {
   poiTrailBufferRef: React.MutableRefObject<Map<number, PovTrailEntry[]>>;
   poiProjectionStateRef: React.MutableRefObject<Map<number, PovProjectionState>>;
   poiAccumulatedDistRef: React.MutableRefObject<Map<number, number>>;
+  pixelCometStateRef: React.MutableRefObject<PixelCometState>;
+  pixelCometLastTimeRef: React.MutableRefObject<number>;
   activeTabRef: React.MutableRefObject<string>;
   isRecordingRef: React.MutableRefObject<boolean>;
   stampedVideoCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -80,6 +85,7 @@ export function executeRenderLoopStep({
   smoothingCanvasRef,
   maskedBlurCanvasRef,
   driftCanvasRef,
+  lightPaintingStateRef,
   poiPatternCanvasRef,
   poiPatternDataRef,
   poiCustomImageElementRef,
@@ -94,6 +100,8 @@ export function executeRenderLoopStep({
   poiTrailBufferRef,
   poiProjectionStateRef,
   poiAccumulatedDistRef,
+  pixelCometStateRef,
+  pixelCometLastTimeRef,
   activeTabRef,
   isRecordingRef,
   stampedVideoCanvasRef,
@@ -207,13 +215,13 @@ export function executeRenderLoopStep({
       isRecordingRef,
       animationFrameIdRef,
       render,
-      presentTemporalEffects: !renderer.usesGpuTemporalEffects,
+      presentTemporalEffects: !renderer.usesGpuTemporalEffects || currentSettings.trailEffectMode !== 'standard',
       presentBase: !renderer.usesGpuCloneStamp,
     });
     renderer.clearTemporalState();
     renderer.render({
       source: renderer.usesGpuCloneStamp ? video : canvas,
-      povLayer: currentSettings.enablePoiMode && !currentSettings.poiPovEnabled
+      povLayer: currentSettings.enablePoiMode && currentSettings.pixelEffectMode !== 'comets' && !currentSettings.poiPovEnabled
         ? trailCanvas
         : povCanvasRef.current ?? undefined,
       overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,
@@ -282,6 +290,7 @@ export function executeRenderLoopStep({
     frameCountAbsRef,
     colorCycleAngleRef,
     driftCanvasRef,
+    lightPaintingStateRef,
     poiPatternCanvasRef,
     poiPatternDataRef,
     poiCustomImageElementRef,
@@ -296,7 +305,9 @@ export function executeRenderLoopStep({
     poiTrailBufferRef,
     poiProjectionStateRef,
     poiAccumulatedDistRef,
-    renderStandardTrails: !renderer.usesGpuTemporalEffects,
+    pixelCometStateRef,
+    pixelCometLastTimeRef,
+    renderStandardTrails: !renderer.usesGpuTemporalEffects || currentSettings.trailEffectMode !== 'standard',
     presentPov: !renderer.usesGpuTemporalEffects,
   });
 
@@ -334,7 +345,7 @@ export function executeRenderLoopStep({
   renderer.render({
     source: renderer.usesGpuCloneStamp ? video : canvas,
     motionMask: procCanvas,
-    povLayer: currentSettings.enablePoiMode && !currentSettings.poiPovEnabled
+    povLayer: currentSettings.enablePoiMode && currentSettings.pixelEffectMode !== 'comets' && !currentSettings.poiPovEnabled
       ? trailCanvas
       : povCanvasRef.current ?? undefined,
     overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,

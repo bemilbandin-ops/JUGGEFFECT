@@ -13,6 +13,12 @@ import {
   TrackedPointInput,
 } from '../utils/pov';
 import { drawPovSample } from '../utils/ledShaders';
+import { processPixelComets, type PixelCometState } from './pixelCometProcessor';
+import {
+  renderClubDepthTunnels,
+  renderLightPaintingSweeps,
+  type LightPaintingState,
+} from './lightPaintingProcessor';
 
 export interface TrailProcessorParams {
   currentSettings: TrackingSettings;
@@ -27,6 +33,7 @@ export interface TrailProcessorParams {
   frameCountAbsRef: React.MutableRefObject<number>;
   colorCycleAngleRef: React.MutableRefObject<number>;
   driftCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  lightPaintingStateRef: React.MutableRefObject<LightPaintingState>;
   poiPatternCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   poiPatternDataRef: React.MutableRefObject<ImageData | null>;
   poiCustomImageElementRef: React.MutableRefObject<HTMLImageElement | null>;
@@ -41,6 +48,8 @@ export interface TrailProcessorParams {
   poiTrailBufferRef: React.MutableRefObject<Map<number, PovTrailEntry[]>>;
   poiProjectionStateRef: React.MutableRefObject<Map<number, PovProjectionState>>;
   poiAccumulatedDistRef: React.MutableRefObject<Map<number, number>>;
+  pixelCometStateRef: React.MutableRefObject<PixelCometState>;
+  pixelCometLastTimeRef: React.MutableRefObject<number>;
   renderStandardTrails?: boolean;
   presentPov?: boolean;
 }
@@ -59,6 +68,7 @@ export function processTrails(params: TrailProcessorParams): void {
     frameCountAbsRef,
     colorCycleAngleRef,
     driftCanvasRef,
+    lightPaintingStateRef,
     poiPatternCanvasRef,
     poiPatternDataRef,
     poiCustomImageElementRef,
@@ -73,12 +83,16 @@ export function processTrails(params: TrailProcessorParams): void {
     poiTrailBufferRef,
     poiProjectionStateRef,
     poiAccumulatedDistRef,
+    pixelCometStateRef,
+    pixelCometLastTimeRef,
     renderStandardTrails = true,
     presentPov = true,
   } = params;
 
   const shouldProcessTrails = currentSettings.enableTrails;
-  const usePov = currentSettings.poiPovEnabled;
+  const isComet = currentSettings.pixelEffectMode === 'comets';
+  const usePov = !isComet && currentSettings.poiPovEnabled;
+  if (currentSettings.trailEffectMode !== 'light-painting') lightPaintingStateRef.current.clear();
 
   if (!renderStandardTrails && !currentSettings.enablePoiMode) {
     trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
@@ -90,6 +104,7 @@ export function processTrails(params: TrailProcessorParams): void {
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    pixelCometStateRef.current.clear();
     return;
   }
 
@@ -150,7 +165,7 @@ export function processTrails(params: TrailProcessorParams): void {
       
       if (currentSettings.enablePoiMode) {
         const patternCanvas = poiPatternCanvasRef.current || (poiPatternCanvasRef.current = document.createElement('canvas'));
-        if (!poiPatternDataRef.current) {
+        if (!isComet && !poiPatternDataRef.current) {
           updatePoiPattern(patternCanvas, currentSettings, poiCustomImageElementRef.current);
           const pCtx = patternCanvas.getContext('2d');
           if (pCtx && patternCanvas.width > 0 && patternCanvas.height > 0) {
@@ -196,11 +211,29 @@ export function processTrails(params: TrailProcessorParams): void {
             () => nextTrackedIdRef.current++
           );
 
+          if (isComet && povCanvasRef.current) {
+            poiTrailBufferRef.current.clear();
+            poiProjectionStateRef.current.clear();
+            poiAccumulatedDistRef.current.clear();
+            processPixelComets({
+              trackedProps: trackedPointsRef.current.filter((point) => point.lastSeen === now),
+              elapsedMs: pixelCometLastTimeRef.current ? now - pixelCometLastTimeRef.current : 1000 / 60,
+              settings: currentSettings,
+              canvas: povCanvasRef.current,
+              ctx: povCanvasRef.current.getContext('2d')!,
+              state: pixelCometStateRef.current,
+            });
+            pixelCometLastTimeRef.current = now;
+          } else {
+            pixelCometStateRef.current.clear();
+            pixelCometLastTimeRef.current = now;
+          }
+
           const patternWidth = patternCanvas.width;
           const patternHeight = patternCanvas.height;
           const imgData = poiPatternDataRef.current;
 
-          if (imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
+          if (!isComet && imgData && imgData.width > 0 && imgData.height > 0 && patternWidth > 0) {
             const povCanvas = povCanvasRef.current;
             const povCtx = povCanvas ? povCanvas.getContext('2d') : null;
 
@@ -476,8 +509,6 @@ export function processTrails(params: TrailProcessorParams): void {
 
                 const W = currentSettings.poiWidth;
                 const orientation = currentSettings.poiOrientation;
-                const renderMode = currentSettings.poiRenderMode || 'dots';
-
                 for (const [id, trail] of poiTrailBufferRef.current) {
                   // Evict old entries
                   const cutoff = now - povRetention;
@@ -521,7 +552,7 @@ export function processTrails(params: TrailProcessorParams): void {
                     );
 
                     const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
-                    drawPovSample(povCtx, imgData, renderMode, {
+                    drawPovSample(povCtx, imgData, {
                       x: entry.x,
                       y: entry.y,
                       colIdx: entry.colIdx,
@@ -538,7 +569,6 @@ export function processTrails(params: TrailProcessorParams): void {
           }
         }
       } else {
-        trackedPointsRef.current = [];
         if (povCanvasRef.current) {
           const povCtx = povCanvasRef.current.getContext('2d');
           if (povCtx) povCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
@@ -546,7 +576,46 @@ export function processTrails(params: TrailProcessorParams): void {
         poiTrailBufferRef.current.clear();
         poiProjectionStateRef.current.clear();
         poiAccumulatedDistRef.current.clear();
-        trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
+        pixelCometStateRef.current.clear();
+        if (currentSettings.trailEffectMode !== 'standard' && motionMaskDataRef.current) {
+          const scaleX = trailCanvas.width / procCanvas.width;
+          const scaleY = trailCanvas.height / procCanvas.height;
+          const maxPropLength = Math.max(procCanvas.width, procCanvas.height) * 0.7;
+          const blobs = detectBlobs(motionMaskDataRef.current, 3)
+            .filter((blob) => blob.aspectRatio >= 1.4 && blob.length <= maxPropLength)
+            .map((blob) => ({
+              ...blob,
+              x: blob.x * scaleX,
+              y: blob.y * scaleY,
+              length: blob.length * Math.max(scaleX, scaleY),
+            }));
+          trackedPointsRef.current = matchTrackedPoints(
+            blobs,
+            trackedPointsRef.current,
+            100,
+            now,
+            () => nextTrackedIdRef.current++,
+          );
+          const effectParams = {
+            trackedProps: trackedPointsRef.current.filter((point) => (
+              point.lastSeen === now && point.envelopeFrame >= 2
+            )),
+            sourceData: motionMaskDataRef.current,
+            outputWidth: trailCanvas.width,
+            outputHeight: trailCanvas.height,
+            ctx: trailCtx,
+            state: lightPaintingStateRef.current,
+          };
+          if (currentSettings.trailEffectMode === 'depth-tunnel') {
+            renderClubDepthTunnels(effectParams);
+          } else {
+            renderLightPaintingSweeps(effectParams);
+          }
+        } else {
+          trackedPointsRef.current = [];
+          lightPaintingStateRef.current.clear();
+          trailCtx.drawImage(procCanvas, 0, 0, trailCanvas.width, trailCanvas.height);
+        }
       }
       trailCtx.filter = 'none';
     }
@@ -558,11 +627,17 @@ export function processTrails(params: TrailProcessorParams): void {
 
     ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
     if (renderStandardTrails) ctx.drawImage(trailCanvas, 0, 0, w, h);
-    if (presentPov && currentSettings.enablePoiMode && usePov && povCanvasRef.current) {
+    if (presentPov && currentSettings.enablePoiMode && (usePov || isComet) && povCanvasRef.current) {
       const povCanvas = povCanvasRef.current;
-      const glowEnabled = currentSettings.poiGlowEnabled;
-      const glowRadius = currentSettings.poiGlowRadius || 6;
-      const glowIntensity = currentSettings.poiGlowIntensity || 0.5;
+      const glowEnabled = isComet
+        ? currentSettings.cometGlowIntensity > 0
+        : currentSettings.poiGlowEnabled;
+      const glowRadius = isComet
+        ? 2 + currentSettings.cometGlowIntensity * 6
+        : currentSettings.poiGlowRadius || 6;
+      const glowIntensity = isComet
+        ? currentSettings.cometGlowIntensity
+        : currentSettings.poiGlowIntensity || 0.5;
 
       // 1. Glow pass
       if (glowEnabled && glowRadius > 0 && glowIntensity > 0) {
@@ -588,5 +663,6 @@ export function processTrails(params: TrailProcessorParams): void {
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    pixelCometStateRef.current.clear();
   }
 }

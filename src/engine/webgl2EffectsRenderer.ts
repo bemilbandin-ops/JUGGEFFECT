@@ -317,7 +317,9 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
     this.drawAdjustedFrame(frameTexture, settings);
     const baseTexture = this.drawMotionBlur(settings.motionBlur, updateTemporalState && !!motionMask);
 
-    const showStandardTrails = settings.enableTrails && !settings.enablePoiMode;
+    const showStandardTrails = settings.enableTrails
+      && !settings.enablePoiMode
+      && settings.trailEffectMode === 'standard';
     if (!showStandardTrails && this.trailHistoryReady) this.clearTrailHistory();
     if (showStandardTrails && updateTemporalState) {
       this.colorCycleAngle = (this.colorCycleAngle + settings.colorCycleSpeed) % 360;
@@ -327,8 +329,11 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
     }
 
     const showPov = settings.enableTrails && settings.enablePoiMode && !!povLayer;
-    const showGlow = showPov && settings.poiPovEnabled && settings.poiGlowEnabled && settings.poiGlowRadius > 0 && settings.poiGlowIntensity > 0;
-    if (showGlow) this.blurTexture(this.povTexture!, settings.poiGlowRadius);
+    const isComet = settings.pixelEffectMode === 'comets';
+    const glowIntensity = isComet ? settings.cometGlowIntensity : settings.poiGlowIntensity;
+    const glowRadius = isComet ? 2 + glowIntensity * 6 : settings.poiGlowRadius;
+    const showGlow = showPov && glowIntensity > 0 && (isComet || (settings.poiPovEnabled && settings.poiGlowEnabled));
+    if (showGlow) this.blurTexture(this.povTexture!, glowRadius);
     this.drawComposite(baseTexture, settings, showStandardTrails, showPov, showGlow, !!overlayLayer);
 
     if (isStrobeActive && isStrobeTriggered) {
@@ -593,7 +598,10 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
     gl.uniform1i(gl.getUniformLocation(program, 'u_showPov'), showPov ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_showGlow'), showGlow ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_showOverlay'), showOverlay ? 1 : 0);
-    gl.uniform1f(gl.getUniformLocation(program, 'u_glowIntensity'), settings.poiGlowIntensity);
+    gl.uniform1f(
+      gl.getUniformLocation(program, 'u_glowIntensity'),
+      settings.pixelEffectMode === 'comets' ? settings.cometGlowIntensity : settings.poiGlowIntensity
+    );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 

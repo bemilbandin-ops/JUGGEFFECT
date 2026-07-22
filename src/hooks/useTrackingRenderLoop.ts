@@ -9,6 +9,8 @@ import { executeRenderLoopStep } from '../engine/renderLoopEngine';
 import { createEffectsRenderer, type EffectsRenderer } from '../engine/effectsRenderer';
 import { PovProjectionState, PovTrailEntry } from '../utils/pov';
 import { updatePoiPattern } from '../utils/poiPatternGenerator';
+import { createPixelCometState } from '../engine/pixelCometProcessor';
+import { createLightPaintingState } from '../engine/lightPaintingProcessor';
 
 export function useTrackingRenderLoop() {
   // Element Refs
@@ -31,6 +33,7 @@ export function useTrackingRenderLoop() {
   const blurredVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskedBlurCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const driftCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lightPaintingStateRef = useRef(createLightPaintingState());
   const smoothingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const strobeVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -57,6 +60,8 @@ export function useTrackingRenderLoop() {
   const poiAccumulatedDistRef = useRef<Map<number, number>>(new Map());
   const poiProjectionStateRef = useRef<Map<number, PovProjectionState>>(new Map());
   const lastSettingsStrRef = useRef<string>('');
+  const pixelCometStateRef = useRef(createPixelCometState());
+  const pixelCometLastTimeRef = useRef(0);
   const trackedPointsRef = useRef<
     { id: number; x: number; y: number; prevX?: number; prevY?: number; angle: number; length: number; envelopeFrame: number; lastSeen: number }[]
   >([]);
@@ -225,6 +230,7 @@ export function useTrackingRenderLoop() {
     poiTrailBufferRef,
     poiProjectionStateRef,
     poiAccumulatedDistRef,
+    pixelCometStateRef,
     settings,
     setFps,
     setRecordedVideoUrl,
@@ -245,6 +251,8 @@ export function useTrackingRenderLoop() {
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    pixelCometStateRef.current.clear();
+    lightPaintingStateRef.current.clear();
     effectsRendererRef.current?.clearTemporalState();
 
     setSettings((prev) => {
@@ -256,6 +264,7 @@ export function useTrackingRenderLoop() {
       return {
         ...base,
         enablePoiMode: false,
+        trailEffectMode: 'standard',
         ...presetSettings,
       };
     });
@@ -349,6 +358,7 @@ export function useTrackingRenderLoop() {
         smoothingCanvasRef,
         maskedBlurCanvasRef,
         driftCanvasRef,
+        lightPaintingStateRef,
         poiPatternCanvasRef,
         poiPatternDataRef,
         poiCustomImageElementRef,
@@ -363,6 +373,8 @@ export function useTrackingRenderLoop() {
         poiTrailBufferRef,
         poiProjectionStateRef,
         poiAccumulatedDistRef,
+        pixelCometStateRef,
+        pixelCometLastTimeRef,
         activeTabRef,
         isRecordingRef,
         stampedVideoCanvasRef,

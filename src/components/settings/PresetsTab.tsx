@@ -11,8 +11,8 @@ import {
   Moon,
   Flame,
   Rainbow,
+  Palette,
   ScanLine,
-  Blocks,
   type LucideIcon,
 } from 'lucide-react';
 import { TrackingSettings } from '../../types';
@@ -27,8 +27,8 @@ const PRESET_ICONS: Record<string, LucideIcon> = {
   Moon,
   Flame,
   Rainbow,
+  Palette,
   ScanLine,
-  Blocks,
 };
 
 export interface PresetsTabProps {
