@@ -213,7 +213,9 @@ export function executeRenderLoopStep({
     renderer.clearTemporalState();
     renderer.render({
       source: renderer.usesGpuCloneStamp ? video : canvas,
-      povLayer: povCanvasRef.current ?? undefined,
+      povLayer: currentSettings.enablePoiMode && !currentSettings.poiPovEnabled
+        ? trailCanvas
+        : povCanvasRef.current ?? undefined,
       overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,
       cloneMask: removalMaskCanvas,
       cloneMaskRevision: removalMaskRevisionRef.current,
@@ -332,7 +334,9 @@ export function executeRenderLoopStep({
   renderer.render({
     source: renderer.usesGpuCloneStamp ? video : canvas,
     motionMask: procCanvas,
-    povLayer: povCanvasRef.current ?? undefined,
+    povLayer: currentSettings.enablePoiMode && !currentSettings.poiPovEnabled
+      ? trailCanvas
+      : povCanvasRef.current ?? undefined,
     overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,
     cloneMask: removalMaskCanvas,
     cloneMaskRevision: removalMaskRevisionRef.current,

@@ -9,6 +9,9 @@ export interface PoiTabProps {
 }
 
 export default function PoiTab({ settings, setSettings }: PoiTabProps) {
+  const usesPov = settings.poiPovEnabled ?? false;
+  const usesCircularPov = usesPov && settings.poiPovMotionMode === 'circular';
+
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
@@ -141,7 +144,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 />
               </div>
             )}
-            <div className="flex flex-col gap-1.5">
+            {!usesCircularPov && <div className="flex flex-col gap-1.5">
               <span className="text-xs text-neutral-400">Effect Orientation</span>
               <select
                 value={settings.poiOrientation}
@@ -156,9 +159,9 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 <option value="motion">Motion Direction (Trailing Stick)</option>
                 <option value="radial">Radial Circle (Light Wheels)</option>
               </select>
-            </div>
+            </div>}
 
-            <div className="flex flex-col gap-1.5">
+            {!usesPov && <div className="flex flex-col gap-1.5">
               <span className="text-xs text-neutral-400">Pattern Mapping Mode</span>
               <select
                 value={settings.poiMappingMode}
@@ -171,9 +174,9 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 <option value="spatial">Map to Screen Position (for Flags & Text)</option>
                 <option value="time">Cycle over Time (Standard)</option>
               </select>
-            </div>
+            </div>}
 
-            <div className="flex flex-col gap-1.5">
+            {!usesPov && <div className="flex flex-col gap-1.5">
               <span className="text-xs text-neutral-400">Render Style</span>
               <select
                 value={settings.poiRenderMode}
@@ -185,7 +188,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 <option value="dots">Dotted LEDs (Discrete Points)</option>
                 <option value="solid">Solid Ribbon (Smeared Brush)</option>
               </select>
-            </div>
+            </div>}
 
             {/* POV Sweep Settings */}
             <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
@@ -213,7 +216,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                     className="w-full accent-blue-500 h-1 bg-neutral-850 rounded-lg appearance-none cursor-pointer" />
                 </div>
 
-                <div className="flex flex-col gap-1">
+                {settings.poiPovMotionMode !== 'circular' && <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-[10px]">
                     <span className="text-neutral-500">Column Spacing</span>
                     <span className="text-neutral-300 font-mono">{settings.poiPovColumnSpacing ?? 3}px</span>
@@ -221,7 +224,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                   <input type="range" min="1" max="20" step="1" value={settings.poiPovColumnSpacing ?? 3}
                     onChange={(e) => setSettings((prev) => ({ ...prev, poiPovColumnSpacing: parseInt(e.target.value) }))}
                     className="w-full accent-blue-500 h-1 bg-neutral-850 rounded-lg appearance-none cursor-pointer" />
-                </div>
+                </div>}
 
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[10px] text-neutral-500">Fade Curve</span>
@@ -294,7 +297,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
               </div>
             </div>
 
-            {settings.poiOrientation === 'radial' && (
+            {(usesCircularPov || settings.poiOrientation === 'radial') && (
               <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
                 <span className="text-[10px] text-neutral-400 block font-medium">Center of Rotation (Crosshair)</span>
                 
@@ -373,7 +376,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            {!usesPov && settings.poiMappingMode === 'time' && <div className="flex flex-col gap-1">
               <div className="flex justify-between text-xs">
                 <span className="text-neutral-400">Pattern Draw Speed</span>
                 <span className="text-neutral-200 font-mono">{settings.poiSpeedMultiplier.toFixed(1)}x</span>
@@ -389,7 +392,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 }
                 className="w-full accent-blue-500 h-1 bg-neutral-850 rounded-lg appearance-none cursor-pointer"
               />
-            </div>
+            </div>}
 
             <div className="flex flex-col gap-1">
               <div className="flex justify-between text-xs">

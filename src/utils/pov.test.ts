@@ -158,12 +158,47 @@ function testJumpRejection() {
   console.log('✓ Jump rejection passed.');
 }
 
+function testFreePathColumnSpacing() {
+  console.log('--- Testing Free-Path Column Spacing ---');
+  let state = createPovProjectionState();
+  const trail: PovSample[] = [];
+  const sampleAt = (x: number) => samplePovColumns({
+    id: 1,
+    x,
+    y: 0,
+    prevX: x > 0 ? x - 1 : undefined,
+    prevY: x > 0 ? 0 : undefined,
+    angle: 0,
+    length: 50,
+    opacity: 1,
+    timestamp: x,
+    colIdx: 0,
+    motionMode: 'free',
+    circularCenter: { x: 0, y: 0 },
+    columnSpacing: 10,
+    patternWidth: 20,
+    projectionState: state,
+    existingTrail: trail,
+  });
+
+  const first = sampleAt(0);
+  state = first[0].state;
+  trail.push(...first);
+  for (let x = 1; x < 10; x++) {
+    assert(sampleAt(x).length === 0, `Should not emit before 10px spacing (x=${x})`);
+  }
+  const next = sampleAt(10);
+  assert(next.length === 1, `Should emit once after 10px, got ${next.length}`);
+  console.log('✓ Free-path column spacing passed.');
+}
+
 function runAll() {
   try {
     testTrackMatching();
     testUnwrapRadialAngle();
     testCircularProjectionNoGaps();
     testJumpRejection();
+    testFreePathColumnSpacing();
     console.log('\nALL TESTS PASSED SUCCESSFULLY! 🎉');
   } catch (e: any) {
     console.error('\nTEST FAILURE:', e.message);

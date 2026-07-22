@@ -85,13 +85,13 @@ precision mediump float;
 uniform sampler2D u_previous;
 uniform sampler2D u_current;
 uniform sampler2D u_mask;
-uniform vec2 u_texelSize;
+uniform sampler2D u_fresh;
 uniform vec2 u_drift;
 uniform float u_zoom;
 uniform float u_fade;
-uniform float u_blurRadius;
 uniform float u_hue;
 uniform bool u_hasHistory;
+uniform bool u_useFreshTexture;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -120,19 +120,10 @@ void main() {
   vec2 historyUv = (v_uv - vec2(0.5) - u_drift) / u_zoom + vec2(0.5);
   bool inside = all(greaterThanEqual(historyUv, vec2(0.0))) && all(lessThanEqual(historyUv, vec2(1.0)));
   vec4 previous = (u_hasHistory && inside) ? texture(u_previous, historyUv) : vec4(0.0);
-  previous.a *= 1.0 - u_fade;
+  previous *= 1.0 - u_fade;
 
-  vec2 stepSize = u_texelSize * u_blurRadius;
-  vec4 fresh = maskedCurrent(v_uv) * 0.28;
-  fresh += maskedCurrent(v_uv + vec2(stepSize.x, 0.0)) * 0.12;
-  fresh += maskedCurrent(v_uv - vec2(stepSize.x, 0.0)) * 0.12;
-  fresh += maskedCurrent(v_uv + vec2(0.0, stepSize.y)) * 0.12;
-  fresh += maskedCurrent(v_uv - vec2(0.0, stepSize.y)) * 0.12;
-  fresh += maskedCurrent(v_uv + stepSize) * 0.06;
-  fresh += maskedCurrent(v_uv - stepSize) * 0.06;
-  fresh += maskedCurrent(v_uv + vec2(stepSize.x, -stepSize.y)) * 0.06;
-  fresh += maskedCurrent(v_uv + vec2(-stepSize.x, stepSize.y)) * 0.06;
-  fresh.rgb = rotateHue(fresh.rgb, u_hue);
+  vec4 fresh = u_useFreshTexture ? texture(u_fresh, v_uv) : maskedCurrent(v_uv);
+  if (!u_useFreshTexture) fresh.rgb = rotateHue(fresh.rgb, u_hue);
 
   outColor = fresh + previous * (1.0 - fresh.a);
 }`;
@@ -141,14 +132,31 @@ const GLOW_SHADER = `#version 300 es
 precision mediump float;
 uniform sampler2D u_source;
 uniform vec2 u_direction;
+uniform float u_radius;
 in vec2 v_uv;
 out vec4 outColor;
+
+float gaussian(float offset, float sigma) {
+  return exp(-0.5 * offset * offset / (sigma * sigma));
+}
+
 void main() {
-  outColor = texture(u_source, v_uv) * 0.227027;
-  outColor += texture(u_source, v_uv + u_direction * 1.384615) * 0.316216;
-  outColor += texture(u_source, v_uv - u_direction * 1.384615) * 0.316216;
-  outColor += texture(u_source, v_uv + u_direction * 3.230769) * 0.070270;
-  outColor += texture(u_source, v_uv - u_direction * 3.230769) * 0.070270;
+  float sigma = max(u_radius * 0.5, 0.5);
+  vec4 color = texture(u_source, v_uv);
+  float totalWeight = 1.0;
+  for (int pair = 0; pair < 10; pair++) {
+    float firstOffset = float(pair * 2 + 1);
+    if (firstOffset > u_radius) continue;
+    float firstWeight = gaussian(firstOffset, sigma);
+    float secondOffset = firstOffset + 1.0;
+    float secondWeight = secondOffset <= u_radius ? gaussian(secondOffset, sigma) : 0.0;
+    float pairWeight = firstWeight + secondWeight;
+    float sampleOffset = (firstOffset * firstWeight + secondOffset * secondWeight) / pairWeight;
+    color += texture(u_source, v_uv + u_direction * sampleOffset) * pairWeight;
+    color += texture(u_source, v_uv - u_direction * sampleOffset) * pairWeight;
+    totalWeight += 2.0 * pairWeight;
+  }
+  outColor = color / totalWeight;
 }`;
 
 const COMPOSITE_SHADER = `#version 300 es
@@ -169,7 +177,11 @@ out vec4 outColor;
 
 vec3 blendLayer(vec3 base, vec4 layer) {
   if (u_blendMode == 1) return min(base + layer.rgb, 1.0);
-  if (u_blendMode == 2) return min(base / max(vec3(0.001), vec3(1.0) - layer.rgb), 1.0);
+  if (u_blendMode == 2) {
+    vec3 source = layer.a > 0.0 ? clamp(layer.rgb / layer.a, 0.0, 1.0) : vec3(0.0);
+    vec3 dodge = min(base / max(vec3(0.001), vec3(1.0) - source), 1.0);
+    return mix(base, dodge, layer.a);
+  }
   if (u_blendMode == 3) return layer.rgb + base * (1.0 - layer.a);
   return 1.0 - (1.0 - base) * (1.0 - layer.rgb);
 }
@@ -314,9 +326,9 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
       this.updateTrails(baseTexture, settings);
     }
 
-    const showPov = settings.enableTrails && settings.enablePoiMode && settings.poiPovEnabled && !!povLayer;
-    const showGlow = showPov && settings.poiGlowEnabled && settings.poiGlowRadius > 0 && settings.poiGlowIntensity > 0;
-    if (showGlow) this.drawGlow(settings.poiGlowRadius);
+    const showPov = settings.enableTrails && settings.enablePoiMode && !!povLayer;
+    const showGlow = showPov && settings.poiPovEnabled && settings.poiGlowEnabled && settings.poiGlowRadius > 0 && settings.poiGlowIntensity > 0;
+    if (showGlow) this.blurTexture(this.povTexture!, settings.poiGlowRadius);
     this.drawComposite(baseTexture, settings, showStandardTrails, showPov, showGlow, !!overlayLayer);
 
     if (isStrobeActive && isStrobeTriggered) {
@@ -488,12 +500,36 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
 
   private updateTrails(baseTexture: WebGLTexture, settings: EffectsFrame['settings']): void {
     if (!this.trailTargets) return;
+    let freshTexture: WebGLTexture | null = null;
+    if (settings.blurAmount > 0 && this.glowTargets) {
+      this.drawTrailPass(this.glowTargets.write.framebuffer, baseTexture, settings, null, false);
+      this.glowTargets.swap();
+      freshTexture = this.blurTexture(this.glowTargets.read.texture, settings.blurAmount);
+    }
+    this.drawTrailPass(
+      this.trailTargets.write.framebuffer,
+      baseTexture,
+      settings,
+      freshTexture,
+      this.trailHistoryReady
+    );
+    this.trailTargets.swap();
+    this.trailHistoryReady = true;
+  }
+
+  private drawTrailPass(
+    framebuffer: WebGLFramebuffer,
+    baseTexture: WebGLTexture,
+    settings: EffectsFrame['settings'],
+    freshTexture: WebGLTexture | null,
+    hasHistory: boolean
+  ): void {
     const gl = this.gl;
-    const program = this.useProgram('trail', this.trailTargets.write.framebuffer);
+    const program = this.useProgram('trail', framebuffer);
     this.bindTexture(program, 'u_previous', this.trailTargets.read.texture, 0);
     this.bindTexture(program, 'u_current', baseTexture, 1);
     this.bindTexture(program, 'u_mask', this.maskTexture!, 2);
-    gl.uniform2f(gl.getUniformLocation(program, 'u_texelSize'), 1 / this.targetWidth, 1 / this.targetHeight);
+    this.bindTexture(program, 'u_fresh', freshTexture || baseTexture, 3);
     gl.uniform2f(
       gl.getUniformLocation(program, 'u_drift'),
       settings.horizontalDrift / this.targetWidth,
@@ -501,15 +537,13 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
     );
     gl.uniform1f(gl.getUniformLocation(program, 'u_zoom'), settings.feedbackZoom);
     gl.uniform1f(gl.getUniformLocation(program, 'u_fade'), settings.echoFadeRate);
-    gl.uniform1f(gl.getUniformLocation(program, 'u_blurRadius'), settings.blurAmount);
     gl.uniform1f(
       gl.getUniformLocation(program, 'u_hue'),
       ((settings.hueRotate + this.colorCycleAngle) * Math.PI) / 180
     );
-    gl.uniform1i(gl.getUniformLocation(program, 'u_hasHistory'), this.trailHistoryReady ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_hasHistory'), hasHistory ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_useFreshTexture'), freshTexture ? 1 : 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    this.trailTargets.swap();
-    this.trailHistoryReady = true;
   }
 
   private clearTrailHistory(): void {
@@ -518,20 +552,23 @@ export class WebGL2EffectsRenderer implements EffectsRenderer {
     this.colorCycleAngle = 0;
   }
 
-  private drawGlow(radius: number): void {
-    if (!this.glowTargets || !this.povTexture) return;
+  private blurTexture(source: WebGLTexture, radius: number): WebGLTexture {
+    if (!this.glowTargets || radius <= 0) return source;
     const gl = this.gl;
     let program = this.useProgram('glow', this.glowTargets.write.framebuffer);
-    this.bindTexture(program, 'u_source', this.povTexture, 0);
-    gl.uniform2f(gl.getUniformLocation(program, 'u_direction'), radius / this.targetWidth, 0);
+    this.bindTexture(program, 'u_source', source, 0);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_direction'), 1 / this.targetWidth, 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_radius'), radius);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     this.glowTargets.swap();
 
     program = this.useProgram('glow', this.glowTargets.write.framebuffer);
     this.bindTexture(program, 'u_source', this.glowTargets.read.texture, 0);
-    gl.uniform2f(gl.getUniformLocation(program, 'u_direction'), 0, radius / this.targetHeight);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_direction'), 0, 1 / this.targetHeight);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_radius'), radius);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     this.glowTargets.swap();
+    return this.glowTargets.read.texture;
   }
 
   private drawComposite(

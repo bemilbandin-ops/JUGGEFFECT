@@ -563,7 +563,7 @@ export function processTrails(params: TrailProcessorParams): void {
       : currentSettings.compositeMode;
 
     ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
-    ctx.drawImage(trailCanvas, 0, 0, w, h);
+    if (renderStandardTrails) ctx.drawImage(trailCanvas, 0, 0, w, h);
     if (presentPov && currentSettings.enablePoiMode && usePov && povCanvasRef.current) {
       const povCanvas = povCanvasRef.current;
       const glowEnabled = currentSettings.poiGlowEnabled;

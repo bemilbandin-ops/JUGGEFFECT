@@ -142,19 +142,19 @@ export default function TrailsTab({ settings, setSettings }: TrailsTabProps) {
             />
           </div>
 
-          {/* Edge & Glow Effects Subgroup */}
+          {/* Mask & Trail Softness Subgroup */}
           <div className="bg-neutral-950/40 border border-neutral-800/80 rounded-md p-3.5 flex flex-col gap-4 mt-2">
             <span className="text-[10px] font-mono text-neutral-400 uppercase tracking-wider font-semibold border-b border-neutral-800/60 pb-1.5 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              Edge & Glow Controls
+              Mask & Trail Softness
             </span>
             
-            {/* Shape Anti-Aliasing */}
+            {/* Detection Edge Feather */}
             <div className="flex flex-col gap-1.5">
               <div className="flex justify-between text-xs">
                 <div className="flex flex-col">
-                  <span className="text-neutral-400">Shape Anti-Aliasing</span>
-                  <span className="text-[10px] text-neutral-500">Smooths pixelated staircases on mask edges perfectly without smearing the shape.</span>
+                  <span className="text-neutral-400">Detection Edge Feather</span>
+                  <span className="text-[10px] text-neutral-500">Softens uncertain, low-contrast motion boundaries.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.edgeAntiAliasing}</span>
               </div>
@@ -179,9 +179,9 @@ export default function TrailsTab({ settings, setSettings }: TrailsTabProps) {
                     <Award className="w-3.5 h-3.5 text-neutral-400/80" />
                     Smear Edges
                   </span>
-                  <span className="text-[10px] text-neutral-500">Applies a spatial blur (creates a glowing cloud if set too high).</span>
+                  <span className="text-[10px] text-neutral-500">Spatially smooths the 640×480 motion mask before output scaling.</span>
                 </div>
-                <span className="text-neutral-200 font-mono">{settings.lineSmoothness}px</span>
+                <span className="text-neutral-200 font-mono">{settings.lineSmoothness} mask px</span>
               </div>
               <input
                 type="range"
@@ -204,7 +204,7 @@ export default function TrailsTab({ settings, setSettings }: TrailsTabProps) {
                     <Sparkles className="w-3.5 h-3.5 text-neutral-400/80" />
                     Trail Blur Amount
                   </span>
-                  <span className="text-[10px] text-neutral-500">Applies a soft glow-like blur to the trails.</span>
+                  <span className="text-[10px] text-neutral-500">Softens each fresh trail stamp before it enters trail history.</span>
                 </div>
                 <span className="text-neutral-200 font-mono">{settings.blurAmount}px</span>
               </div>
@@ -249,7 +249,7 @@ export default function TrailsTab({ settings, setSettings }: TrailsTabProps) {
           <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex flex-col mb-1">
               <span className="text-xs text-neutral-400">Blend Mode</span>
-              <span className="text-[10px] text-neutral-500">How new frames blend with older trails.</span>
+              <span className="text-[10px] text-neutral-500">How the accumulated trail composites over live video.</span>
             </div>
             <select
               value={settings.enableTrails ? settings.compositeMode : 'none'}

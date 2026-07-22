@@ -115,6 +115,7 @@ export function useTrackingRenderLoop() {
         poiCustomImageElementRef.current = img;
         if (poiPatternCanvasRef.current) {
           updatePoiPattern(poiPatternCanvasRef.current, settings, img);
+          poiPatternDataRef.current = null;
         }
       };
       img.src = settings.poiCustomImage;

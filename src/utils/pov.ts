@@ -442,24 +442,9 @@ export function appendFreePovEntries(
 
   const accumulated = state.accumulatedDistance + distMoved;
   if (accumulated < columnSpacing) {
-    samples.push({
-      id: input.id,
-      x,
-      y,
-      angle,
-      motionAngle,
-      colIdx,
-      length: input.length,
-      opacity: input.opacity,
-      timestamp: timestamp,
-      state: {
-        progress: state.progress,
-        angle: state.angle,
-        accumulatedDistance: accumulated,
-        lastX: x,
-        lastY: y,
-      },
-    });
+    state.accumulatedDistance = accumulated;
+    state.lastX = x;
+    state.lastY = y;
     return;
   }
 
