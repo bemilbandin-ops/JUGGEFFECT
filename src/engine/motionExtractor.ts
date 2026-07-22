@@ -3,7 +3,7 @@ import type { TrackingSettings } from '../types';
 import { updateBackgroundAndExtractMotion } from '../utils/cv';
 
 export interface MotionExtractorParams {
-  stampedVideoCanvas: HTMLCanvasElement;
+  frameSource: HTMLCanvasElement | HTMLVideoElement;
   procCanvas: HTMLCanvasElement;
   procCtx: CanvasRenderingContext2D;
   trackingFilter: string;
@@ -15,7 +15,7 @@ export interface MotionExtractorParams {
 
 export function extractMotion(params: MotionExtractorParams): void {
   const {
-    stampedVideoCanvas,
+    frameSource,
     procCanvas,
     procCtx,
     trackingFilter,
@@ -27,7 +27,7 @@ export function extractMotion(params: MotionExtractorParams): void {
 
   // Draw frame to low-res canvas for high performance (using sharp video)
   procCtx.filter = trackingFilter;
-  procCtx.drawImage(stampedVideoCanvas, 0, 0, procCanvas.width, procCanvas.height);
+  procCtx.drawImage(frameSource, 0, 0, procCanvas.width, procCanvas.height);
   procCtx.filter = 'none';
 
   let procImageData: ImageData;

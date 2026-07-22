@@ -32,6 +32,7 @@ export interface SettingsDrawerProps {
   cameraActive: boolean;
   removalMaskCtxRef: React.RefObject<CanvasRenderingContext2D | null>;
   removalMaskCanvasRef: React.RefObject<HTMLCanvasElement | null>;
+  removalMaskRevisionRef: React.MutableRefObject<number>;
   startCamera: () => void;
 }
 
@@ -51,6 +52,7 @@ export default function SettingsDrawer({
   cameraActive,
   removalMaskCtxRef,
   removalMaskCanvasRef,
+  removalMaskRevisionRef,
   startCamera,
 }: SettingsDrawerProps) {
   return (
@@ -136,6 +138,7 @@ export default function SettingsDrawer({
                 setSettings={setSettings}
                 removalMaskCtxRef={removalMaskCtxRef}
                 removalMaskCanvasRef={removalMaskCanvasRef}
+                removalMaskRevisionRef={removalMaskRevisionRef}
               />
             )}
 

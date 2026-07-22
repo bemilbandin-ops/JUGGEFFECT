@@ -7,6 +7,7 @@ export interface PaintTabProps {
   setSettings: React.Dispatch<React.SetStateAction<TrackingSettings>>;
   removalMaskCtxRef: React.RefObject<CanvasRenderingContext2D | null>;
   removalMaskCanvasRef: React.RefObject<HTMLCanvasElement | null>;
+  removalMaskRevisionRef: React.MutableRefObject<number>;
 }
 
 export default function PaintTab({
@@ -14,6 +15,7 @@ export default function PaintTab({
   setSettings,
   removalMaskCtxRef,
   removalMaskCanvasRef,
+  removalMaskRevisionRef,
 }: PaintTabProps) {
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded p-5 flex flex-col gap-4">
@@ -138,6 +140,7 @@ export default function PaintTab({
                     removalMaskCanvasRef.current.width,
                     removalMaskCanvasRef.current.height
                   );
+                  removalMaskRevisionRef.current++;
                 }
               }}
               className="mt-2 text-xs flex items-center justify-center gap-1.5 py-2 px-3 rounded-sm border border-rose-950 bg-rose-950/20 text-rose-400 hover:bg-rose-950/40 hover:border-rose-800 transition-all cursor-pointer font-medium active:scale-97"

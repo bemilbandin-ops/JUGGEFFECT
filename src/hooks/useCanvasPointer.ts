@@ -4,12 +4,14 @@ import { TrackingSettings } from '../types';
 export interface UseCanvasPointerParams {
   displayCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   removalMaskCtxRef: React.RefObject<CanvasRenderingContext2D | null>;
+  removalMaskRevisionRef: React.MutableRefObject<number>;
   settings: TrackingSettings;
 }
 
 export function useCanvasPointer({
   displayCanvasRef,
   removalMaskCtxRef,
+  removalMaskRevisionRef,
   settings,
 }: UseCanvasPointerParams) {
   const lastPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -67,6 +69,7 @@ export function useCanvasPointer({
         maskCtx.arc(pos.x, pos.y, settings.cloneStampBrushSize / 2, 0, Math.PI * 2);
         maskCtx.fillStyle = 'white';
         maskCtx.fill();
+        removalMaskRevisionRef.current++;
       }
     }
   };
@@ -93,6 +96,7 @@ export function useCanvasPointer({
         maskCtx.lineCap = 'round';
         maskCtx.lineJoin = 'round';
         maskCtx.stroke();
+        removalMaskRevisionRef.current++;
       }
     }
     lastPosRef.current = pos;

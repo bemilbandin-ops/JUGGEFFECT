@@ -41,6 +41,8 @@ export interface TrailProcessorParams {
   poiTrailBufferRef: React.MutableRefObject<Map<number, PovTrailEntry[]>>;
   poiProjectionStateRef: React.MutableRefObject<Map<number, PovProjectionState>>;
   poiAccumulatedDistRef: React.MutableRefObject<Map<number, number>>;
+  renderStandardTrails?: boolean;
+  presentPov?: boolean;
 }
 
 export function processTrails(params: TrailProcessorParams): void {
@@ -71,10 +73,25 @@ export function processTrails(params: TrailProcessorParams): void {
     poiTrailBufferRef,
     poiProjectionStateRef,
     poiAccumulatedDistRef,
+    renderStandardTrails = true,
+    presentPov = true,
   } = params;
 
   const shouldProcessTrails = currentSettings.enableTrails;
   const usePov = currentSettings.poiPovEnabled;
+
+  if (!renderStandardTrails && !currentSettings.enablePoiMode) {
+    trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+    if (povCanvasRef.current) {
+      const povCtx = povCanvasRef.current.getContext('2d');
+      if (povCtx) povCtx.clearRect(0, 0, povCanvasRef.current.width, povCanvasRef.current.height);
+    }
+    trackedPointsRef.current = [];
+    poiTrailBufferRef.current.clear();
+    poiProjectionStateRef.current.clear();
+    poiAccumulatedDistRef.current.clear();
+    return;
+  }
 
   if (shouldProcessTrails) {
     // Effect: Color Cycle updates continuously for smooth hue rotation
@@ -547,7 +564,7 @@ export function processTrails(params: TrailProcessorParams): void {
 
     ctx.globalCompositeOperation = blendMode as GlobalCompositeOperation;
     ctx.drawImage(trailCanvas, 0, 0, w, h);
-    if (currentSettings.enablePoiMode && usePov && povCanvasRef.current) {
+    if (presentPov && currentSettings.enablePoiMode && usePov && povCanvasRef.current) {
       const povCanvas = povCanvasRef.current;
       const glowEnabled = currentSettings.poiGlowEnabled;
       const glowRadius = currentSettings.poiGlowRadius || 6;

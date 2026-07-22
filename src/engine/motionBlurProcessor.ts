@@ -4,7 +4,6 @@ import type { TrackingSettings } from '../types';
 export interface MotionBlurProcessorParams {
   currentSettings: TrackingSettings;
   blurredVideoCtx: CanvasRenderingContext2D;
-  cameraFilter: string;
   stampedVideoCanvas: HTMLCanvasElement;
   blurredVideoCanvas: HTMLCanvasElement;
   maskedBlurCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -19,7 +18,6 @@ export function processMotionBlur(params: MotionBlurProcessorParams): void {
   const {
     currentSettings,
     blurredVideoCtx,
-    cameraFilter,
     stampedVideoCanvas,
     blurredVideoCanvas,
     maskedBlurCanvasRef,
@@ -33,11 +31,9 @@ export function processMotionBlur(params: MotionBlurProcessorParams): void {
   // 4. Temporal Motion Blur (Only applied to moving objects)
   if (currentSettings.motionBlur > 0) {
     // Accumulate video frames inside the blur canvas
-    blurredVideoCtx.filter = cameraFilter;
     blurredVideoCtx.globalAlpha = 1.0 - currentSettings.motionBlur;
     blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
     blurredVideoCtx.globalAlpha = 1.0;
-    blurredVideoCtx.filter = 'none';
 
     if (!maskedBlurCanvasRef.current) {
       maskedBlurCanvasRef.current = document.createElement('canvas');
@@ -67,8 +63,6 @@ export function processMotionBlur(params: MotionBlurProcessorParams): void {
     }
   } else {
     // Keep it seeded so it doesn't blink black if turned on
-    blurredVideoCtx.filter = cameraFilter;
     blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, blurredVideoCanvas.width, blurredVideoCanvas.height);
-    blurredVideoCtx.filter = 'none';
   }
 }

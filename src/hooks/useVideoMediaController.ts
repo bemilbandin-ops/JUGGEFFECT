@@ -17,6 +17,7 @@ export interface UseVideoMediaControllerParams {
   settings: TrackingSettings;
   setFps: React.Dispatch<React.SetStateAction<number>>;
   setRecordedVideoUrl: (url: string | null) => void;
+  clearRendererTemporalState: () => void;
   startRenderLoop: () => void;
 }
 
@@ -36,6 +37,7 @@ export function useVideoMediaController({
   settings,
   setFps,
   setRecordedVideoUrl,
+  clearRendererTemporalState,
   startRenderLoop,
 }: UseVideoMediaControllerParams) {
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -148,6 +150,7 @@ export function useVideoMediaController({
   const handleSeeked = () => {
     bgDataRef.current = null;
     motionMaskDataRef.current = null;
+    clearRendererTemporalState();
   };
 
   const handleScrubChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,12 +198,14 @@ export function useVideoMediaController({
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    clearRendererTemporalState();
   };
 
   async function startCamera() {
     setCameraLoading(true);
     stopCamera();
     setRecordedVideoUrl(null);
+    clearRendererTemporalState();
 
     try {
       if (videoSourceMode === 'camera') {
@@ -258,6 +263,7 @@ export function useVideoMediaController({
       }
       bgDataRef.current = null;
       motionMaskDataRef.current = null;
+      clearRendererTemporalState();
       if (trailCanvasRef.current) {
         const tCtx = trailCanvasRef.current.getContext('2d');
         if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
@@ -282,6 +288,7 @@ export function useVideoMediaController({
         if (videoRef.current && videoRef.current.videoWidth > 0 && !animationFrameIdRef.current) {
           bgDataRef.current = null;
           motionMaskDataRef.current = null;
+          clearRendererTemporalState();
           if (trailCanvasRef.current) {
             const tCtx = trailCanvasRef.current.getContext('2d');
             if (tCtx) tCtx.clearRect(0, 0, trailCanvasRef.current.width, trailCanvasRef.current.height);
@@ -325,6 +332,7 @@ export function useVideoMediaController({
     setIsPaused(false);
     setCurrentTime(0);
     setDuration(0);
+    clearRendererTemporalState();
   }
 
   function toggleFullscreen() {

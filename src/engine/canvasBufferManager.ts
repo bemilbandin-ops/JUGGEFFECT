@@ -3,8 +3,8 @@ import React from 'react';
 export interface EnsureCanvasBuffersParams {
   videoWidth: number;
   videoHeight: number;
-  cameraFilter: string;
-  stampedVideoCanvas: HTMLCanvasElement;
+  frameSource: HTMLCanvasElement | HTMLVideoElement;
+  needsCanvas2dEffects: boolean;
   processingCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   trailCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   blurredVideoCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -17,9 +17,9 @@ export interface CanvasBuffers {
   procCtx: CanvasRenderingContext2D;
   trailCanvas: HTMLCanvasElement;
   trailCtx: CanvasRenderingContext2D;
-  blurredVideoCanvas: HTMLCanvasElement;
-  blurredVideoCtx: CanvasRenderingContext2D;
-  strobeVideoCanvas: HTMLCanvasElement;
+  blurredVideoCanvas: HTMLCanvasElement | null;
+  blurredVideoCtx: CanvasRenderingContext2D | null;
+  strobeVideoCanvas: HTMLCanvasElement | null;
   strobeVideoCtx: CanvasRenderingContext2D | null;
   povCanvas: HTMLCanvasElement;
 }
@@ -27,8 +27,8 @@ export interface CanvasBuffers {
 export function ensureCanvasBuffers({
   videoWidth,
   videoHeight,
-  cameraFilter,
-  stampedVideoCanvas,
+  frameSource,
+  needsCanvas2dEffects,
   processingCanvasRef,
   trailCanvasRef,
   blurredVideoCanvasRef,
@@ -47,17 +47,17 @@ export function ensureCanvasBuffers({
   const trailCanvas = trailCanvasRef.current;
   const trailCtx = trailCanvas.getContext('2d');
 
-  if (!blurredVideoCanvasRef.current) {
+  if (needsCanvas2dEffects && !blurredVideoCanvasRef.current) {
     blurredVideoCanvasRef.current = document.createElement('canvas');
   }
   const blurredVideoCanvas = blurredVideoCanvasRef.current;
-  const blurredVideoCtx = blurredVideoCanvas.getContext('2d');
+  const blurredVideoCtx = blurredVideoCanvas?.getContext('2d') ?? null;
 
-  if (!strobeVideoCanvasRef.current) {
+  if (needsCanvas2dEffects && !strobeVideoCanvasRef.current) {
     strobeVideoCanvasRef.current = document.createElement('canvas');
   }
   const strobeVideoCanvas = strobeVideoCanvasRef.current;
-  const strobeVideoCtx = strobeVideoCanvas.getContext('2d');
+  const strobeVideoCtx = strobeVideoCanvas?.getContext('2d') ?? null;
 
   if (!povCanvasRef.current) {
     povCanvasRef.current = document.createElement('canvas');
@@ -67,7 +67,7 @@ export function ensureCanvasBuffers({
   procCanvas.width = 640;
   procCanvas.height = 480;
 
-  if (!procCtx || !trailCtx || !blurredVideoCtx) return null;
+  if (!procCtx || !trailCtx || (needsCanvas2dEffects && !blurredVideoCtx)) return null;
 
   if (trailCanvas.width !== videoWidth || trailCanvas.height !== videoHeight) {
     trailCanvas.width = videoWidth;
@@ -77,20 +77,16 @@ export function ensureCanvasBuffers({
     povCanvas.width = videoWidth;
     povCanvas.height = videoHeight;
   }
-  if (blurredVideoCanvas.width !== videoWidth || blurredVideoCanvas.height !== videoHeight) {
+  if (blurredVideoCanvas && blurredVideoCtx && (blurredVideoCanvas.width !== videoWidth || blurredVideoCanvas.height !== videoHeight)) {
     blurredVideoCanvas.width = videoWidth;
     blurredVideoCanvas.height = videoHeight;
-    blurredVideoCtx.filter = cameraFilter;
-    blurredVideoCtx.drawImage(stampedVideoCanvas, 0, 0, videoWidth, videoHeight);
-    blurredVideoCtx.filter = 'none';
+    blurredVideoCtx.drawImage(frameSource, 0, 0, videoWidth, videoHeight);
   }
-  if (strobeVideoCanvas.width !== videoWidth || strobeVideoCanvas.height !== videoHeight) {
+  if (strobeVideoCanvas && (strobeVideoCanvas.width !== videoWidth || strobeVideoCanvas.height !== videoHeight)) {
     strobeVideoCanvas.width = videoWidth;
     strobeVideoCanvas.height = videoHeight;
     if (strobeVideoCtx) {
-      strobeVideoCtx.filter = cameraFilter;
-      strobeVideoCtx.drawImage(stampedVideoCanvas, 0, 0, videoWidth, videoHeight);
-      strobeVideoCtx.filter = 'none';
+      strobeVideoCtx.drawImage(frameSource, 0, 0, videoWidth, videoHeight);
     }
   }
 

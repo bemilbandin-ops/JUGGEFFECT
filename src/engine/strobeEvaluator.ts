@@ -4,6 +4,18 @@ export interface StrobeEvaluationResult {
   nextLastStrobeTime: number;
 }
 
+export type StrobePresentation = 'live' | 'held' | 'black';
+
+export function getStrobePresentation(
+  isActive: boolean,
+  mode: 'freeze' | 'flash',
+  elapsedSinceTrigger: number
+): StrobePresentation {
+  if (!isActive) return 'live';
+  if (mode === 'freeze' || elapsedSinceTrigger <= 40) return 'held';
+  return 'black';
+}
+
 export function evaluateStrobeTrigger(
   strobeRate: number,
   now: number,

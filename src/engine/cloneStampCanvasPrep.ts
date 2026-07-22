@@ -7,25 +7,12 @@ export interface PreparedCloneStampCanvases {
   removalMaskCtx: CanvasRenderingContext2D | null;
 }
 
-export function prepareCloneStampBaseCanvases(
-  stampedVideoCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+export function prepareRemovalMaskCanvas(
   removalMaskCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
   removalMaskCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>,
   targetWidth: number,
   targetHeight: number
-): PreparedCloneStampCanvases {
-  // Initialize and resize stampedVideoCanvasRef
-  if (!stampedVideoCanvasRef.current) {
-    stampedVideoCanvasRef.current = document.createElement('canvas');
-  }
-  const stampedVideoCanvas = stampedVideoCanvasRef.current;
-  const stampedVideoCtx = stampedVideoCanvas.getContext('2d');
-  if (stampedVideoCanvas.width !== targetWidth || stampedVideoCanvas.height !== targetHeight) {
-    stampedVideoCanvas.width = targetWidth;
-    stampedVideoCanvas.height = targetHeight;
-  }
-
-  // Initialize and resize removalMaskCanvasRef (preserving painted path)
+): HTMLCanvasElement {
   if (!removalMaskCanvasRef.current) {
     removalMaskCanvasRef.current = document.createElement('canvas');
     removalMaskCtxRef.current = removalMaskCanvasRef.current.getContext('2d');
@@ -45,12 +32,39 @@ export function prepareCloneStampBaseCanvases(
     if (removalMaskCtx) {
       removalMaskCtx.lineCap = 'round';
       removalMaskCtx.lineJoin = 'round';
-      removalMaskCtx.clearRect(0, 0, removalMaskCanvas.width, removalMaskCanvas.height);
       if (tempCanvas.width > 0 && tempCanvas.height > 0) {
         removalMaskCtx.drawImage(tempCanvas, 0, 0, removalMaskCanvas.width, removalMaskCanvas.height);
       }
     }
   }
+  return removalMaskCanvas;
+}
+
+export function prepareCloneStampBaseCanvases(
+  stampedVideoCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+  removalMaskCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+  removalMaskCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>,
+  targetWidth: number,
+  targetHeight: number
+): PreparedCloneStampCanvases {
+  // Initialize and resize stampedVideoCanvasRef
+  if (!stampedVideoCanvasRef.current) {
+    stampedVideoCanvasRef.current = document.createElement('canvas');
+  }
+  const stampedVideoCanvas = stampedVideoCanvasRef.current;
+  const stampedVideoCtx = stampedVideoCanvas.getContext('2d');
+  if (stampedVideoCanvas.width !== targetWidth || stampedVideoCanvas.height !== targetHeight) {
+    stampedVideoCanvas.width = targetWidth;
+    stampedVideoCanvas.height = targetHeight;
+  }
+
+  const removalMaskCanvas = prepareRemovalMaskCanvas(
+    removalMaskCanvasRef,
+    removalMaskCtxRef,
+    targetWidth,
+    targetHeight
+  );
+  const removalMaskCtx = removalMaskCtxRef.current;
 
   return {
     stampedVideoCanvas,

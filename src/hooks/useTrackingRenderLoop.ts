@@ -6,6 +6,7 @@ import { useVideoRecorder } from './useVideoRecorder';
 import { useVideoMediaController } from './useVideoMediaController';
 import { useCanvasPointer } from './useCanvasPointer';
 import { executeRenderLoopStep } from '../engine/renderLoopEngine';
+import { createEffectsRenderer, type EffectsRenderer } from '../engine/effectsRenderer';
 import { PovProjectionState, PovTrailEntry } from '../utils/pov';
 import { updatePoiPattern } from '../utils/poiPatternGenerator';
 
@@ -13,6 +14,8 @@ export function useTrackingRenderLoop() {
   // Element Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const compositionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const effectsRendererRef = useRef<EffectsRenderer | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Tracking state refs (to avoid React state overhead at 60fps)
@@ -31,9 +34,15 @@ export function useTrackingRenderLoop() {
   const smoothingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const strobeVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  useEffect(() => () => {
+    effectsRendererRef.current?.dispose();
+    effectsRendererRef.current = null;
+  }, []);
+
   // Clone stamp refs
   const removalMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const removalMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const removalMaskRevisionRef = useRef(0);
   const stampedVideoCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cloneDestCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const featheredMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -164,6 +173,7 @@ export function useTrackingRenderLoop() {
   } = useCanvasPointer({
     displayCanvasRef,
     removalMaskCtxRef,
+    removalMaskRevisionRef,
     settings,
   });
 
@@ -217,6 +227,7 @@ export function useTrackingRenderLoop() {
     settings,
     setFps,
     setRecordedVideoUrl,
+    clearRendererTemporalState: () => effectsRendererRef.current?.clearTemporalState(),
     startRenderLoop,
   });
 
@@ -233,6 +244,7 @@ export function useTrackingRenderLoop() {
     poiTrailBufferRef.current.clear();
     poiProjectionStateRef.current.clear();
     poiAccumulatedDistRef.current.clear();
+    effectsRendererRef.current?.clearTemporalState();
 
     setSettings((prev) => {
       let base = originalSettings;
@@ -306,9 +318,17 @@ export function useTrackingRenderLoop() {
     }
 
     const video = videoRef.current;
-    const canvas = displayCanvasRef.current;
-    if (!video || !canvas) return;
+    const displayCanvas = displayCanvasRef.current;
+    if (!video || !displayCanvas) return;
 
+    if (!compositionCanvasRef.current) {
+      compositionCanvasRef.current = document.createElement('canvas');
+    }
+    if (!effectsRendererRef.current) {
+      effectsRendererRef.current = createEffectsRenderer(displayCanvas);
+    }
+    const canvas = compositionCanvasRef.current;
+    const renderer = effectsRendererRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -317,6 +337,7 @@ export function useTrackingRenderLoop() {
         video,
         canvas,
         ctx,
+        renderer,
         settingsRef,
         animationFrameIdRef,
         lastTimeRef,
@@ -346,6 +367,7 @@ export function useTrackingRenderLoop() {
         stampedVideoCanvasRef,
         removalMaskCanvasRef,
         removalMaskCtxRef,
+        removalMaskRevisionRef,
         cloneDestCanvasRef,
         featheredMaskCanvasRef,
         clonedLayerCanvasRef,
@@ -372,6 +394,7 @@ export function useTrackingRenderLoop() {
     containerRef,
     removalMaskCanvasRef,
     removalMaskCtxRef,
+    removalMaskRevisionRef,
     cameraActive,
     cameraLoading,
     isPaused,

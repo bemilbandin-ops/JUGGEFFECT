@@ -15,6 +15,7 @@ export default function TrackingCanvas() {
     containerRef,
     removalMaskCanvasRef,
     removalMaskCtxRef,
+    removalMaskRevisionRef,
     cameraActive,
     cameraLoading,
     isPaused,
@@ -239,6 +240,7 @@ export default function TrackingCanvas() {
         cameraActive={cameraActive}
         removalMaskCtxRef={removalMaskCtxRef}
         removalMaskCanvasRef={removalMaskCanvasRef}
+        removalMaskRevisionRef={removalMaskRevisionRef}
         startCamera={startCamera}
       />
 

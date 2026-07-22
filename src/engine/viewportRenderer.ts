@@ -3,15 +3,15 @@ import { evaluateStrobeTrigger } from './strobeEvaluator';
 
 export interface RenderViewportOptions {
   ctx: CanvasRenderingContext2D;
-  stampedVideoCanvas: HTMLCanvasElement;
-  strobeVideoCanvas: HTMLCanvasElement;
+  frameSource: HTMLCanvasElement | HTMLVideoElement;
+  strobeVideoCanvas: HTMLCanvasElement | null;
   strobeVideoCtx: CanvasRenderingContext2D | null;
-  cameraFilter: string;
   currentSettings: TrackingSettings;
   now: number;
   lastStrobeTime: number;
   w: number;
   h: number;
+  presentStrobe?: boolean;
 }
 
 export interface RenderViewportResult {
@@ -22,15 +22,15 @@ export interface RenderViewportResult {
 
 export function renderViewportFrame({
   ctx,
-  stampedVideoCanvas,
+  frameSource,
   strobeVideoCanvas,
   strobeVideoCtx,
-  cameraFilter,
   currentSettings,
   now,
   lastStrobeTime,
   w,
   h,
+  presentStrobe = true,
 }: RenderViewportOptions): RenderViewportResult {
   const { isStrobeActive, isStrobeTriggered, nextLastStrobeTime } = evaluateStrobeTrigger(
     currentSettings.strobeRate,
@@ -38,16 +38,14 @@ export function renderViewportFrame({
     lastStrobeTime
   );
 
-  if (isStrobeActive && isStrobeTriggered && strobeVideoCtx) {
-    strobeVideoCtx.filter = cameraFilter;
-    strobeVideoCtx.drawImage(stampedVideoCanvas, 0, 0, stampedVideoCanvas.width, stampedVideoCanvas.height);
-    strobeVideoCtx.filter = 'none';
+  if (presentStrobe && isStrobeActive && isStrobeTriggered && strobeVideoCtx && strobeVideoCanvas) {
+    strobeVideoCtx.drawImage(frameSource, 0, 0, w, h);
   }
 
-  if (!isStrobeActive) {
-    ctx.filter = cameraFilter;
-    ctx.drawImage(stampedVideoCanvas, 0, 0, w, h);
-    ctx.filter = 'none';
+  if (!presentStrobe) {
+    // WebGL presents the completed composition after POV and glow are applied.
+  } else if (!isStrobeActive) {
+    ctx.drawImage(frameSource, 0, 0, w, h);
   } else {
     if (currentSettings.strobeMode === 'flash') {
       const flashDuration = 40; // ms

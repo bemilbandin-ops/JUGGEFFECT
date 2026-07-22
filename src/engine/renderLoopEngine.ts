@@ -1,7 +1,8 @@
 import React from 'react';
 import { TrackingSettings } from '../types';
-import { getCameraFilterString, getTrackingFilterString } from './cameraFilters';
-import { prepareCloneStampBaseCanvases } from './cloneStampCanvasPrep';
+import { getTrackingFilterString } from './cameraFilters';
+import type { EffectsRenderer } from './effectsRenderer';
+import { prepareCloneStampBaseCanvases, prepareRemovalMaskCanvas } from './cloneStampCanvasPrep';
 import { compositeCloneStamp } from './cloneStampCompositor';
 import { ensureCanvasBuffers } from './canvasBufferManager';
 import { renderPausedFrame } from './pausedFrameRenderer';
@@ -19,6 +20,7 @@ export interface ExecuteRenderLoopStepParams {
   video: HTMLVideoElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
+  renderer: EffectsRenderer;
   settingsRef: React.MutableRefObject<TrackingSettings>;
   animationFrameIdRef: React.MutableRefObject<number | null>;
   lastTimeRef: React.MutableRefObject<number>;
@@ -48,6 +50,7 @@ export interface ExecuteRenderLoopStepParams {
   stampedVideoCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   removalMaskCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   removalMaskCtxRef: React.MutableRefObject<CanvasRenderingContext2D | null>;
+  removalMaskRevisionRef: React.MutableRefObject<number>;
   cloneDestCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   featheredMaskCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   clonedLayerCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -66,6 +69,7 @@ export function executeRenderLoopStep({
   video,
   canvas,
   ctx,
+  renderer,
   settingsRef,
   animationFrameIdRef,
   lastTimeRef,
@@ -95,6 +99,7 @@ export function executeRenderLoopStep({
   stampedVideoCanvasRef,
   removalMaskCanvasRef,
   removalMaskCtxRef,
+  removalMaskRevisionRef,
   cloneDestCanvasRef,
   featheredMaskCanvasRef,
   clonedLayerCanvasRef,
@@ -115,34 +120,51 @@ export function executeRenderLoopStep({
 
   const now = performance.now();
   const currentSettings = settingsRef.current;
-  const cameraFilter = getCameraFilterString(currentSettings);
   const trackingFilter = getTrackingFilterString(currentSettings);
 
   if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
   }
+  renderer.resize(video.videoWidth, video.videoHeight);
 
   const w = canvas.width;
   const h = canvas.height;
 
-  const {
-    stampedVideoCanvas,
-    stampedVideoCtx,
-    removalMaskCanvas,
-  } = prepareCloneStampBaseCanvases(
-    stampedVideoCanvasRef,
+  const removalMaskCanvas = prepareRemovalMaskCanvas(
     removalMaskCanvasRef,
     removalMaskCtxRef,
     video.videoWidth,
     video.videoHeight
   );
+  let stampedVideoCanvas: HTMLCanvasElement | null = null;
+  let stampedVideoCtx: CanvasRenderingContext2D | null = null;
+  if (!renderer.usesGpuCloneStamp) {
+    ({ stampedVideoCanvas, stampedVideoCtx } = prepareCloneStampBaseCanvases(
+      stampedVideoCanvasRef,
+      removalMaskCanvasRef,
+      removalMaskCtxRef,
+      video.videoWidth,
+      video.videoHeight
+    ));
+    compositeCloneStamp({
+      video,
+      stampedVideoCanvas,
+      stampedVideoCtx,
+      removalMaskCanvas,
+      currentSettings,
+      cloneDestCanvasRef,
+      featheredMaskCanvasRef,
+      clonedLayerCanvasRef,
+    });
+  }
+  const frameSource: HTMLCanvasElement | HTMLVideoElement = stampedVideoCanvas ?? video;
 
   const buffers = ensureCanvasBuffers({
     videoWidth: video.videoWidth,
     videoHeight: video.videoHeight,
-    cameraFilter,
-    stampedVideoCanvas,
+    frameSource,
+    needsCanvas2dEffects: !renderer.usesGpuTemporalEffects,
     processingCanvasRef,
     trailCanvasRef,
     blurredVideoCanvasRef,
@@ -169,17 +191,11 @@ export function executeRenderLoopStep({
   const isTimeChanged = Math.abs(video.currentTime - lastProcessedVideoTimeRef.current) > 0.0001;
 
   if ((video.paused || video.ended) && !isTimeChanged) {
+    if (renderer.usesGpuCloneStamp) ctx.clearRect(0, 0, w, h);
     renderPausedFrame({
-      video,
-      stampedVideoCanvas,
-      stampedVideoCtx,
-      removalMaskCanvas,
+      frameSource,
       currentSettings,
-      cloneDestCanvasRef,
-      featheredMaskCanvasRef,
-      clonedLayerCanvasRef,
       ctx,
-      cameraFilter,
       w,
       h,
       trailCanvasRef,
@@ -191,39 +207,42 @@ export function executeRenderLoopStep({
       isRecordingRef,
       animationFrameIdRef,
       render,
+      presentTemporalEffects: !renderer.usesGpuTemporalEffects,
+      presentBase: !renderer.usesGpuCloneStamp,
+    });
+    renderer.clearTemporalState();
+    renderer.render({
+      source: renderer.usesGpuCloneStamp ? video : canvas,
+      povLayer: povCanvasRef.current ?? undefined,
+      overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,
+      cloneMask: removalMaskCanvas,
+      cloneMaskRevision: removalMaskRevisionRef.current,
+      settings: currentSettings,
+      time: now,
+      updateTemporalState: false,
     });
     return;
   }
 
   lastProcessedVideoTimeRef.current = video.currentTime;
 
-  compositeCloneStamp({
-    video,
-    stampedVideoCanvas,
-    stampedVideoCtx,
-    removalMaskCanvas,
-    currentSettings,
-    cloneDestCanvasRef,
-    featheredMaskCanvasRef,
-    clonedLayerCanvasRef,
-  });
-
-  const { isStrobeTriggered, nextLastStrobeTime } = renderViewportFrame({
+  if (renderer.usesGpuCloneStamp) ctx.clearRect(0, 0, w, h);
+  const { isStrobeActive, isStrobeTriggered, nextLastStrobeTime } = renderViewportFrame({
     ctx,
-    stampedVideoCanvas,
+    frameSource,
     strobeVideoCanvas,
     strobeVideoCtx,
-    cameraFilter,
     currentSettings,
     now,
     lastStrobeTime: lastStrobeTimeRef.current,
     w,
     h,
+    presentStrobe: !renderer.usesGpuTemporalEffects,
   });
   lastStrobeTimeRef.current = nextLastStrobeTime;
 
   extractMotion({
-    stampedVideoCanvas,
+    frameSource,
     procCanvas,
     procCtx,
     trackingFilter,
@@ -233,19 +252,20 @@ export function executeRenderLoopStep({
     currentSettings,
   });
 
-  processMotionBlur({
-    currentSettings,
-    blurredVideoCtx,
-    cameraFilter,
-    stampedVideoCanvas,
-    blurredVideoCanvas,
-    maskedBlurCanvasRef,
-    video,
-    procCanvas,
-    ctx,
-    w,
-    h,
-  });
+  if (!renderer.usesGpuTemporalEffects && blurredVideoCanvas && blurredVideoCtx) {
+    processMotionBlur({
+      currentSettings,
+      blurredVideoCtx,
+      stampedVideoCanvas: stampedVideoCanvas!,
+      blurredVideoCanvas,
+      maskedBlurCanvasRef,
+      video,
+      procCanvas,
+      ctx,
+      w,
+      h,
+    });
+  }
 
   processTrails({
     currentSettings,
@@ -274,6 +294,8 @@ export function executeRenderLoopStep({
     poiTrailBufferRef,
     poiProjectionStateRef,
     poiAccumulatedDistRef,
+    renderStandardTrails: !renderer.usesGpuTemporalEffects,
+    presentPov: !renderer.usesGpuTemporalEffects,
   });
 
   drawDebugOverlay(ctx, procCanvas, w, h, currentSettings.showDebugFeed);
@@ -306,6 +328,20 @@ export function executeRenderLoopStep({
       currentSettings.poiCenterRelativeY * h
     );
   }
+
+  renderer.render({
+    source: renderer.usesGpuCloneStamp ? video : canvas,
+    motionMask: procCanvas,
+    povLayer: povCanvasRef.current ?? undefined,
+    overlayLayer: renderer.usesGpuCloneStamp ? canvas : undefined,
+    cloneMask: removalMaskCanvas,
+    cloneMaskRevision: removalMaskRevisionRef.current,
+    settings: currentSettings,
+    time: now,
+    isStrobeActive,
+    isStrobeTriggered,
+    updateTemporalState: true,
+  });
 
   scheduleNextFrame(animationFrameIdRef, render);
 }
