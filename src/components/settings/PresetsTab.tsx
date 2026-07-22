@@ -9,9 +9,27 @@ import {
   Activity,
   Infinity as InfinityIcon,
   Moon,
+  Flame,
+  Rainbow,
+  ScanLine,
+  Blocks,
+  type LucideIcon,
 } from 'lucide-react';
 import { TrackingSettings } from '../../types';
 import { QUICK_PRESETS } from '../../config/settingsDefaults';
+
+const PRESET_ICONS: Record<string, LucideIcon> = {
+  Zap,
+  Sparkles,
+  Wind,
+  Activity,
+  Infinity: InfinityIcon,
+  Moon,
+  Flame,
+  Rainbow,
+  ScanLine,
+  Blocks,
+};
 
 export interface PresetsTabProps {
   settings: TrackingSettings;
@@ -64,6 +82,8 @@ export default function PresetsTab({
       <div className="grid grid-cols-2 gap-2.5">
         {QUICK_PRESETS.map((preset) => {
           const isApplied = appliedPresetId === preset.id;
+          const PresetIcon = PRESET_ICONS[preset.icon] ?? Sparkles;
+          const presetColor = preset.color.split(' ')[0];
           return (
             <button
               key={preset.id}
@@ -82,54 +102,11 @@ export default function PresetsTab({
                 >
                   {preset.name}
                 </span>
-                {preset.id === 'led' && (
-                  <Zap
-                    className={`w-3.5 h-3.5 ${
-                      isApplied
-                        ? 'text-amber-400'
-                        : 'text-amber-500/50 group-hover:text-amber-400'
-                    }`}
-                  />
-                )}
-                {preset.id === 'cyberpunk' && (
-                  <Sparkles
-                    className={`w-3.5 h-3.5 ${
-                      isApplied ? 'text-pink-400' : 'text-pink-500/50 group-hover:text-pink-400'
-                    }`}
-                  />
-                )}
-                {preset.id === 'smoke' && (
-                  <Wind
-                    className={`w-3.5 h-3.5 ${
-                      isApplied ? 'text-teal-400' : 'text-teal-500/50 group-hover:text-teal-400'
-                    }`}
-                  />
-                )}
-                {preset.id === 'strobe' && (
-                  <Activity
-                    className={`w-3.5 h-3.5 ${
-                      isApplied ? 'text-cyan-400' : 'text-cyan-500/50 group-hover:text-cyan-400'
-                    }`}
-                  />
-                )}
-                {preset.id === 'vortex' && (
-                  <InfinityIcon
-                    className={`w-3.5 h-3.5 ${
-                      isApplied
-                        ? 'text-indigo-400'
-                        : 'text-indigo-500/50 group-hover:text-indigo-400'
-                    }`}
-                  />
-                )}
-                {preset.id === 'cascade' && (
-                  <Moon
-                    className={`w-3.5 h-3.5 ${
-                      isApplied
-                        ? 'text-purple-400'
-                        : 'text-purple-500/50 group-hover:text-purple-400'
-                    }`}
-                  />
-                )}
+                <PresetIcon
+                  className={`w-3.5 h-3.5 ${presetColor} transition-opacity ${
+                    isApplied ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'
+                  }`}
+                />
               </div>
               <p className="text-[10px] text-neutral-400 leading-normal mb-2 shrink-0">
                 {preset.description}

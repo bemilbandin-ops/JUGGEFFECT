@@ -12,7 +12,7 @@ import {
   PovSample,
   TrackedPointInput,
 } from '../utils/pov';
-import { drawLedColumn } from '../utils/ledShaders';
+import { drawPovSample } from '../utils/ledShaders';
 
 export interface TrailProcessorParams {
   currentSettings: TrackingSettings;
@@ -205,7 +205,7 @@ export function processTrails(params: TrailProcessorParams): void {
             const povCtx = povCanvas ? povCanvas.getContext('2d') : null;
 
             // Clear canvas immediately if key settings change
-            const settingsStr = `${currentSettings.poiPatternType}-${currentSettings.poiWidth}-${currentSettings.poiOrientation}-${currentSettings.poiGlowEnabled}-${currentSettings.poiGlowRadius}`;
+            const settingsStr = `${currentSettings.poiPatternType}-${currentSettings.poiRenderMode}-${currentSettings.poiWidth}-${currentSettings.poiOrientation}-${currentSettings.poiGlowEnabled}-${currentSettings.poiGlowRadius}`;
             if (lastSettingsStrRef.current !== settingsStr) {
               lastSettingsStrRef.current = settingsStr;
               if (povCtx && povCanvas) {
@@ -476,6 +476,7 @@ export function processTrails(params: TrailProcessorParams): void {
 
                 const W = currentSettings.poiWidth;
                 const orientation = currentSettings.poiOrientation;
+                const renderMode = currentSettings.poiRenderMode || 'dots';
 
                 for (const [id, trail] of poiTrailBufferRef.current) {
                   // Evict old entries
@@ -519,24 +520,17 @@ export function processTrails(params: TrailProcessorParams): void {
                       motionMode as 'circular' | 'free'
                     );
 
-                    povCtx.save();
-
-                    if (geom.isRadialOrCircular) {
-                      povCtx.translate(geom.translateX, geom.translateY);
-                      povCtx.rotate(geom.rotationAngle);
-                      povCtx.translate(0, geom.middleOffset);
-                    } else {
-                      povCtx.translate(geom.translateX, geom.translateY);
-                      povCtx.rotate(geom.rotationAngle);
-                    }
-
                     const numLEDs = ledCountOverride > 0 ? ledCountOverride : Math.max(8, Math.floor(entry.length / 5));
-
-                    drawLedColumn(
-                      povCtx, imgData, entry.colIdx, numLEDs, entry.length, W, entryOpacity
-                    );
-
-                    povCtx.restore();
+                    drawPovSample(povCtx, imgData, renderMode, {
+                      x: entry.x,
+                      y: entry.y,
+                      colIdx: entry.colIdx,
+                      length: entry.length,
+                      width: W,
+                      opacity: entryOpacity,
+                      ledCount: numLEDs,
+                      geometry: geom,
+                    });
                   }
                 }
               }

@@ -58,7 +58,7 @@ export interface TrackingSettings {
   poiSpeedMultiplier: number;
   poiMaxPoints: number;
   poiMappingMode: 'time' | 'angle' | 'spatial';
-  poiRenderMode: 'solid' | 'dots';
+  poiRenderMode: 'solid' | 'dots' | 'comets' | 'blocks';
   poiOpacity: number;
   poiFadeInTime: number;
   poiHoldTime: number;

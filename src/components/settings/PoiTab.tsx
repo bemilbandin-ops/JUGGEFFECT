@@ -176,7 +176,7 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
               </select>
             </div>}
 
-            {!usesPov && <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5">
               <span className="text-xs text-neutral-400">Render Style</span>
               <select
                 value={settings.poiRenderMode}
@@ -186,9 +186,11 @@ export default function PoiTab({ settings, setSettings }: PoiTabProps) {
                 className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-xs text-neutral-300 outline-none focus:border-blue-500 cursor-pointer"
               >
                 <option value="dots">Dotted LEDs (Discrete Points)</option>
-                <option value="solid">Solid Ribbon (Smeared Brush)</option>
+                <option value="solid" disabled={usesPov}>Solid Ribbon (Legacy Mode)</option>
+                <option value="comets" disabled={!usesPov}>Pixel Comets (Prop Tips)</option>
+                <option value="blocks" disabled={!usesPov}>Arcade Blocks (Screen Grid)</option>
               </select>
-            </div>}
+            </div>
 
             {/* POV Sweep Settings */}
             <div className="flex flex-col gap-2.5 p-3 bg-neutral-950/40 border border-neutral-800/80 rounded-sm">
